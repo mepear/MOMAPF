@@ -604,4 +604,3 @@ def RunMoAstarSingleAgent(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps
     truncated_cgrids.append(cost_grids[idx])
   moa = MoAstarMAPFBase(grids, [sx], [sy], [gx], [gy], truncated_cvecs, truncated_cgrids, w, eps, time_limit)
   return moa.Search(search_limit)
-

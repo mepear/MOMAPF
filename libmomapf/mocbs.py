@@ -18,6 +18,9 @@ MOCBS_INIT_SIZE_LIMIT = 800*1000
 OPEN_ADD_MODE = 2
 ######
 
+def ReturnCost(element):
+  return element[2]
+
 def EnforceUnitTimePath(lv,lt):
   """
   Given a path (without the final node with infinite timestamp), 
@@ -39,6 +42,10 @@ def EnforceUnitTimePath(lv,lt):
   # end for
   nlv.append(lv[-1])
   nlt.append(lt[-1])
+  
+  # Change operation in class MocbsSol to this function
+  nlv.append(nlv[-1])
+  nlt.append(np.inf)
   return nlv, nlt
   
 class MocbsConstraint:
@@ -79,8 +86,6 @@ class MocbsSol:
     """
     # add a final infinity interval
     nlv,nlt = EnforceUnitTimePath(lv,lt)
-    nlv.append(nlv[-1])
-    nlt.append(np.inf)
     self.paths[i] = [nlv,nlt]
     return 
 
@@ -92,8 +97,6 @@ class MocbsSol:
     return self.paths[i]
 
   def CheckConflict(self, i,j):
-    """
-    """
     ix = 0
     while ix < len(self.paths[i][1])-1:
       for jx in range(len(self.paths[j][1])-1):
@@ -120,7 +123,7 @@ class MocbsNode:
   """
   High level search tree node
   """
-  def __init__(self, id0, cvec, sol=MocbsSol(), cstr=MocbsConstraint(-1,-1,-1,-1,-1,-1), parent=-1):
+  def __init__(self, id0, cvec, num_robots, true_low_bound=None, upper_bound=None, sol=MocbsSol(), cstr=MocbsConstraint(-1,-1,-1,-1,-1,-1), parent=-1):
     """
     id = id of this high level CT node
     sol = an object of type CCbsSol.
@@ -135,11 +138,21 @@ class MocbsNode:
     self.cvec = cvec
     self.parent = -1 
     self.root = -1 # to which tree it belongs
+
+    ## This is the added upper bound and lower bound
+    if (true_low_bound != None):
+      self.true_lower_bound = true_low_bound
+    else:
+      self.true_lower_bound = np.zeros(num_robots)
+    if (upper_bound != None):
+      self.upper_bound = upper_bound
+    else:
+      self.upper_bound = np.ones(num_robots) * np.inf
     return
 
   def __str__(self):
     str1 = "{id:"+str(self.id)+",cvec:"+str(self.cvec)+",par:"+str(self.parent)
-    return str1+",cstr:"+str(self.cstr)+",sol:"+str(self.sol)+"}"
+    return str1+",cstr:"+str(self.cstr)+",sol:"+str(self.sol)+",true_lower_bound:"+str(self.true_lower_bound)+",upper_bound:"+str(self.upper_bound)+"}"
 
   def CheckConflict(self):
     """
@@ -163,10 +176,12 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, grids, sx_list, sy_list, gx_list, gy_list, cvecs, cgrids, expansion_mode, time_limit):
+  def __init__(self, grids, sx_list, sy_list, gx_list, gy_list, cvecs,
+               cgrids, expansion_mode, time_limit, use_cost_bound=False):
     """
     arg grids is a 2d static grid.
     """
+    ## Instance Related args
     self.grids = copy.deepcopy(grids)
     (self.yd, self.xd) = self.grids.shape
     self.sx_list = copy.deepcopy(sx_list)
@@ -179,6 +194,8 @@ class MocbsSearch:
     self.cgrids = copy.deepcopy(cgrids) # for multi-dimensional cost.
     self.expansion_mode = expansion_mode
     self.time_limit = time_limit
+
+    # Search Realted args
     self.nodes = dict() # high level nodes
     self.open_list = cm.PrioritySet()
     self.open_by_tree = dict()
@@ -191,76 +208,191 @@ class MocbsSearch:
     self.curr_root = -1
     self.root_generated = 0
     self.nondom_goal_nodes = set() # a set of HL nodes that reaches goal with non-dom cost vec.
+
+    # Cost Bound Related
+    self.use_cost_bound = use_cost_bound
     return
 
-  def BacktrackCstrs(self, nid):
+  def Search(self, search_limit):
     """
-    given a node, trace back to the root, find all constraints relavant.
+    high level search
     """
-    node_cs = list()
-    swap_cs = list()
-    cid = nid
-    ri = self.nodes[nid].cstr.i
-    while cid != -1:
-      if self.nodes[cid].cstr.i == ri: # not a valid constraint
-        # init call of mocbs will not enter this.
-        cstr = self.nodes[cid].cstr
-        if self.nodes[cid].cstr.flag == 1: # vertex constraint
-          node_cs.append( (cstr.vb, cstr.tb) )
-        elif self.nodes[cid].cstr.flag == 2: # edge constraint
-          swap_cs.append( (cstr.va, cstr.vb, cstr.ta) )
-          node_cs.append( (cstr.va, cstr.tb) ) # since another robot is coming to v=va at t=tb
-      cid = self.nodes[cid].parent
-    return node_cs, swap_cs
+    ########################################################
+    #### init search ####
+    ########################################################
+    self.tstart = time.perf_counter()
+    if (self.expansion_mode == 0 or self.expansion_mode == 1):
+      init_success = self.InitSearch()
+    else:
+      init_success = self.InitSearch_OnDemand()
 
-  def LsearchPlanner(self, ri, node_cs, swap_cs):
-    """
-    """
-    path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
-      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), False, node_cs, swap_cs)
-    return path_dict, lsearch_stats
+    find_first_feasible_sol = False
+    first_sol = []
+    first_sol_gvec = []
 
-  def Lsearch(self, nid):
-    """
-    low level search
-    """
-    nd = self.nodes[nid]
-    ri = nd.cstr.i
-    node_cs, swap_cs = self.BacktrackCstrs(nid)
+    if init_success == 0:
+      output_res = (int(len(self.closed_set)), dict(), 0, \
+                    float(time.perf_counter() - self.tstart), 0, int(self.num_roots), \
+                    int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
+                    float(self.total_low_level_time), int(self.num_low_level_calls))
+      return dict(), output_res
 
-    # call constrained NAMOA*
-    path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs) # replace the following two lines of code.
-    
-    ct = 0 # count of node generated
-    path_list = self.PathDictLexSort(path_dict, lsearch_stats[1]) # enforce order
-    for k in range(len(path_list)): # loop over all individual Pareto paths 
-      new_nd = copy.deepcopy(self.nodes[nid]) # generate new node
-      new_nd.sol.DelPath(ri)
-      new_nd.sol.AddPath(ri, path_list[k][0], path_list[k][1]) # inf end is add here.
-      new_nd.cvec = self.ComputeNodeCostObject(new_nd)
+    search_success = False
+    best_g_value = -1
+    reached_goal_id = -1
 
-      if self.GoalFilterNodeObject(new_nd):
-        continue # skip this dominated node
+    # the following few lines is useful when self.expansion_mode == 1, init self.curr_root
+    for k in self.open_by_tree:
+      self.curr_root = k
+      break
 
-      # a non-dom node, add to OPEN
-      new_id = new_nd.id # the first node, self.nodes[nid] is ok
-      if ct > 0: # generate a new node, assign a new id
+    ########################################################
+    #### init search, END ####
+    ########################################################
+    while True:
+      tnow = time.perf_counter()
+      rd = len(self.closed_set)
+      if (rd > search_limit) or (tnow - self.tstart > self.time_limit):
+        search_success = False
+        break
+      ########################################################
+      #### pop a non-dominated from OPEN ####
+      ########################################################
+      pop_succeed = False
+      popped = []
+      if (self.expansion_mode == 0 or self.expansion_mode == 1):
+        pop_succeed, popped = self.SelectNode()
+      else:
+        pop_succeed, popped = self.SelectNode_OnDemand()
+
+      if not pop_succeed:
+        break
+      if self.GoalFilterNode(popped[1]):
+        continue
+      ########################################################
+      #### pop a non-dominated from OPEN, END ####
+      ########################################################
+
+      ########################################################
+      #### Expand a node ####
+      ########################################################
+      self.closed_set.add(popped[1])  # only used to count numbers
+      curr_node = self.nodes[popped[1]]
+      cstrs = self.FirstConflict(curr_node)
+
+      if len(cstrs) == 0:  # no conflict, find a sol !!
+        if not find_first_feasible_sol:
+          find_first_feasible_sol = True
+          first_sol = copy.deepcopy(curr_node)
+          first_sol_gvec = curr_node.cvec
+        self.RefineNondomGoals(curr_node.id)
+        self.nondom_goal_nodes.add(curr_node.id)
+        continue  # keep going
+
+      for cstr in cstrs:
         new_id = self.node_id_gen
         self.node_id_gen = self.node_id_gen + 1
-        new_nd.id = new_id
-      self.nodes[new_id] = new_nd # add to self.nodes
+        self.nodes[new_id] = copy.deepcopy(curr_node)
+        self.nodes[new_id].id = new_id
+        self.nodes[new_id].parent = curr_node.id
+        self.nodes[new_id].cstr = cstr
+        sstats = self.Lsearch(new_id)  # this can generate multiple nodes
+        self.UpdateStats(sstats)
+        if sstats[2] == 0:
+          # this branch fails, robot ri cannot find a consistent path.
+          continue
+        # node insertion into OPEN is done in Lsearch()
+      ########################################################
+      #### Expand a node, END ####
+      ########################################################
+      # end of for
+    # end of while
 
-      ### ADD OPEN BEGIN
+    all_path_set = dict()
+    all_cost_vec = dict()
+    for nid in self.nondom_goal_nodes:
+      hnode = self.nodes[nid]
+      all_path_set[hnode.id] = hnode.sol.paths
+      all_cost_vec[hnode.id] = hnode.cvec
+    if (self.open_list.size() == 0) and (len(self.nondom_goal_nodes) > 0) and (self.root_generated == self.num_roots):
+      search_success = True
+
+    # output_res = (int(len(self.closed_set)), all_cost_vec, int(search_success), \
+    #               float(time.perf_counter() - self.tstart), int(self.num_closed_low_level_states), \
+    #               int(self.num_roots), int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
+    #               float(self.total_low_level_time), int(self.num_low_level_calls))
+    time_res = "Time : {}".format(round(time.perf_counter() - self.tstart))
+    open_list_res = "Open List : {}".format(self.open_list.size())
+    close_list_res = "Close List : {}".format(len(self.closed_set))
+    low_level_time = "Low Level Time : {}".format(round(self.total_low_level_time))
+    low_level_calls = "Low Level Calls : {}".format(self.num_low_level_calls)
+
+    return all_path_set, all_cost_vec, time_res, open_list_res, close_list_res, low_level_time, low_level_calls
+
+  def InitSearch(self):
+    """
+    called at the beginning of the search.
+    generate first High level node.
+    compute individual optimal path for each robot.
+    """
+    self.pareto_idvl_path_dict = dict()
+    for ri in range(self.num_robots):
+      tnow = time.perf_counter()
+      time_left = self.time_limit - (tnow - self.tstart)
+
+      single_pareto_path, others = moastar.RunMoAstarSingleAgent(self.grids, self.sx_list[ri], self.sy_list[ri], \
+                                                                 self.gx_list[ri], self.gy_list[ri], self.cvecs[ri],
+                                                                 self.cgrids, self.cdim, \
+                                                                 1.0, 0.0, 1e10, time_left)
+
+      self.pareto_idvl_path_dict[ri] = list()
+      for ref_key in single_pareto_path:
+        lv = list()
+        lt = list()
+        curr_time = 0
+        for pt in single_pareto_path[ref_key]:
+          lv.append(pt[0])  # pt is a tuple of 1 element, e.g. (34,)
+          lt.append(curr_time)
+          curr_time = curr_time + 1
+        self.pareto_idvl_path_dict[ri].append((lv, lt))
+
+      tnow = time.perf_counter()
+      if (tnow - self.tstart > self.time_limit):
+        print(" FAIL! timeout! ")
+        return 0
+    # end for
+
+    # for too many root nodes, just terminates...
+    init_size = 1
+    for k in self.pareto_idvl_path_dict:
+      init_size = init_size * len(self.pareto_idvl_path_dict[k])
+    if (init_size > MOCBS_INIT_SIZE_LIMIT):
+      print("[CAVEAT] Too many roots to be generated for MO-CBS. Terminate. (why not use MO-CBS-t?)")
+      self.num_roots = init_size
+      return 0
+    self.num_roots = init_size
+
+    all_combi = list(itt.product(*(self.pareto_idvl_path_dict[ky] for ky in sorted(self.pareto_idvl_path_dict))))
+
+    for jpath in all_combi:
+      nid = self.node_id_gen
+      self.nodes[nid] = copy.deepcopy(MocbsNode(nid, np.zeros(self.cdim), self.num_robots))
+      self.nodes[nid].root = nid
+      self.node_id_gen = self.node_id_gen + 1
+      for ri in range(len(jpath)):
+        self.nodes[nid].sol.AddPath(ri, jpath[ri][0], jpath[ri][1])
+      cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
+
+      self.open_by_tree[nid] = cm.PrioritySet()
+
       if OPEN_ADD_MODE == 1:
-        self.open_list.add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN
-        self.open_by_tree[new_nd.root].add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
+        self.open_list.add(np.sum(cvec), nid)
+        self.open_by_tree[nid].add(np.sum(cvec), nid)
       elif OPEN_ADD_MODE == 2:
-        self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
-        self.open_by_tree[new_nd.root].add(tuple(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
-      ### ADD OPEN END
+        self.open_list.add(tuple(cvec), nid)
+        self.open_by_tree[nid].add(tuple(cvec), nid)
 
-      ct = ct + 1 # count increase
-    return lsearch_stats
+    return 1
 
   def ComputeNodeCostObject(self, nd):
     """
@@ -286,15 +418,155 @@ class MocbsSearch:
         loc = nd.sol.paths[k][0][idx]
         ntt = nd.sol.paths[k][1][nidx]
         tt = nd.sol.paths[k][1][idx]
-        cy = int(np.floor(nloc/self.xd)) # ref x
-        cx = int(nloc%self.xd) # ref y, 
+        cy = int(np.floor(nloc / self.xd)) # ref x
+        cx = int(nloc % self.xd) # ref y
         if nloc != loc: # there is a move, not wait in place.
           for ic in range(self.cdim):
-            out_cost[ic] = out_cost[ic] + self.cvecs[k][ic]*self.cgrids[ic][cy,cx]
+            out_cost[ic] = out_cost[ic] + self.cvecs[k][ic] * self.cgrids[ic][cy,cx]
         else: # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
           out_cost = out_cost + self.cvecs[k]*int(ntt-tt) # np.ones((self.cdim)) # stay in place, fixed energy cost for every robot
     nd.cvec = out_cost # update cost in that node
     return out_cost
+
+  def ComputePathCost(self, path_list, ri):
+    """
+    Give a path list, calculate the first dimension cost
+    """
+    for path in path_list:
+      last_idx = -2
+      for idx in range(len(path[0])):  # find last loc_id that reach goal (remember, last element in lt is timestamp inf !)
+        # self.paths[k][0] is a list of loc_id
+        i1 = len(path[0]) - 1 - idx  # kth loc id
+        i2 = i1 - 1  # (k-1)th loc id
+        if i2 < 0:
+          break
+        if path[0][i2] == path[0][i1]:
+          last_idx = i2
+        else:
+          break
+      # find last_idx
+      for idx in range(last_idx):
+        nidx = idx + 1  # next index
+        nloc = path[0][nidx]
+        loc = path[0][idx]
+        ntt = path[1][nidx]
+        tt = path[1][idx]
+        cy = int(np.floor(nloc / self.xd))  # ref x
+        cx = int(nloc % self.xd)  # ref y,
+        if nloc != loc:  # there is a move, not wait in place.
+          path[2] += self.cvecs[ri][0] * self.cgrids[0][cy, cx]
+        else:  # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
+          path[2] += self.cvecs[ri][0] * int(ntt - tt)  # np.ones((self.cdim)) # stay in place, fixed energy cost for every robot
+    return
+
+  def BacktrackCstrs(self, nid):
+    """
+    given a node, trace back to the root, find all constraints relavant.
+    """
+    node_cs = list()
+    swap_cs = list()
+    cid = nid
+    ri = self.nodes[nid].cstr.i
+    while cid != -1:
+      if self.nodes[cid].cstr.i == ri: # not a valid constraint
+        # init call of mocbs will not enter this.
+        cstr = self.nodes[cid].cstr
+        if self.nodes[cid].cstr.flag == 1: # vertex constraint
+          node_cs.append( (cstr.vb, cstr.tb) )
+        elif self.nodes[cid].cstr.flag == 2: # edge constraint
+          swap_cs.append( (cstr.va, cstr.vb, cstr.ta) )
+          node_cs.append( (cstr.va, cstr.tb) ) # since another robot is coming to v=va at t=tb
+      cid = self.nodes[cid].parent
+    return node_cs, swap_cs
+
+  def LsearchPlanner(self, ri, node_cs, swap_cs):
+    path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
+      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), False, node_cs, swap_cs)
+    return path_dict, lsearch_stats
+
+  def Lsearch(self, nid):
+    """
+    low level search
+    """
+    nd = self.nodes[nid]
+    ri = nd.cstr.i
+    node_cs, swap_cs = self.BacktrackCstrs(nid)
+    true_lower_bound = nd.true_lower_bound[ri]
+    upper_bound = nd.upper_bound[ri]
+
+    # call constrained NAMOA*
+    path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs) # replace the following two lines of code.
+
+    ct = 0 # count of node generated
+    path_list = self.PathDictLexSort(path_dict, lsearch_stats[1]) # enforce order
+
+    # The added part and find cost of each path
+    if self.use_cost_bound:
+      new_path_list = []
+      for k in range(len(path_list)):
+        nlv, nlt = EnforceUnitTimePath(path_list[k][0], path_list[k][1])
+        new_path_list.append([nlv, nlt, 0])
+      self.ComputePathCost(new_path_list, ri)
+      new_path_list.sort(key=ReturnCost)
+
+    if self.use_cost_bound:
+      path_list = new_path_list
+      cost_list = []
+      for i in new_path_list:
+        cost_list.append(i[2])
+      print(cost_list, true_lower_bound, upper_bound)
+
+    for k in range(len(path_list)): # loop over all individual Pareto paths
+      if self.use_cost_bound:
+        if (path_list[k][2] >= upper_bound):
+          break
+        elif (k == len(path_list) - 1):
+          new_nd = copy.deepcopy(self.nodes[nid])
+          new_nd.upper_bound[ri] = upper_bound
+          new_nd.true_lower_bound[ri] = max([true_lower_bound, path_list[k][2]])
+        elif path_list[k][2] > true_lower_bound:
+          new_nd = copy.deepcopy(self.nodes[nid])
+          new_nd.true_lower_bound[ri] = path_list[k][2]
+          new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
+        elif path_list[k][2] <= true_lower_bound:
+          if path_list[k+1][2] > true_lower_bound:
+            new_nd = copy.deepcopy(self.nodes[nid])
+            new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
+            new_nd.true_lower_bound[ri] = true_lower_bound
+          else:
+            continue
+      else:
+        new_nd = copy.deepcopy(self.nodes[nid])
+
+      new_nd.sol.DelPath(ri)
+      if not self.use_cost_bound:
+        new_nd.sol.AddPath(ri, path_list[k][0], path_list[k][1]) # inf end is add here
+      else:
+        new_nd.sol.paths[ri] = [path_list[k][0], path_list[k][1]]
+      new_nd.cvec = self.ComputeNodeCostObject(new_nd)
+
+      if self.GoalFilterNodeObject(new_nd):
+        continue # skip this dominated node
+
+      # a non-dom node, add to OPEN
+      new_id = new_nd.id # the first node, self.nodes[nid] is ok
+      if ct > 0: # generate a new node, assign a new id
+        new_id = self.node_id_gen
+        self.node_id_gen = self.node_id_gen + 1
+        new_nd.id = new_id
+      self.nodes[new_id] = new_nd # add to self.nodes
+
+      ### ADD OPEN BEGIN
+      if OPEN_ADD_MODE == 1:
+        self.open_list.add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN
+        self.open_by_tree[new_nd.root].add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
+      elif OPEN_ADD_MODE == 2:
+        self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
+        self.open_by_tree[new_nd.root].add(tuple(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
+      ### ADD OPEN END
+
+      ct = ct + 1 # count increase
+    return lsearch_stats
 
   def GoalFilterNode(self,nid):
     """
@@ -324,70 +596,6 @@ class MocbsSearch:
         temp_set.remove(fid)
     self.nondom_goal_nodes = temp_set
     return
-
-  def InitSearch(self):
-    """
-    called at the beginning of the search. 
-    generate first High level node.
-    compute individual optimal path for each robot.
-    """
-    self.pareto_idvl_path_dict = dict()
-    for ri in range(self.num_robots):
-      tnow = time.perf_counter()
-      time_left = self.time_limit - (tnow-self.tstart)
-      
-      single_pareto_path, others = moastar.RunMoAstarSingleAgent(self.grids, self.sx_list[ri], self.sy_list[ri], \
-        self.gx_list[ri], self.gy_list[ri], self.cvecs[ri], self.cgrids, self.cdim, \
-        1.0, 0.0, 1e10, time_left )
-      
-      self.pareto_idvl_path_dict[ri] = list()
-      for ref_key in single_pareto_path:
-        lv = list()
-        lt = list()
-        curr_time = 0
-        for pt in single_pareto_path[ref_key]:
-          lv.append(pt[0]) # pt is a tuple of 1 element, e.g. (34,)
-          lt.append(curr_time)
-          curr_time = curr_time + 1
-        self.pareto_idvl_path_dict[ri].append( (lv,lt) )
-
-      tnow = time.perf_counter()
-      if (tnow - self.tstart > self.time_limit):
-        print(" FAIL! timeout! ")
-        return 0
-    # end for
-
-    # for too many root nodes, just terminates...
-    init_size = 1
-    for k in self.pareto_idvl_path_dict:
-      init_size = init_size*len(self.pareto_idvl_path_dict[k])
-    if (init_size > MOCBS_INIT_SIZE_LIMIT):
-      print("[CAVEAT] Too many roots to be generated for MO-CBS. Terminate. (why not use MO-CBS-t?)")
-      self.num_roots = init_size
-      return 0
-    self.num_roots = init_size
-
-    all_combi = list( itt.product(*(self.pareto_idvl_path_dict[ky] for ky in sorted(self.pareto_idvl_path_dict))) )
-
-    for jpath in all_combi:
-      nid = self.node_id_gen
-      self.nodes[nid] = copy.deepcopy(MocbsNode(nid, np.zeros(self.cdim)))
-      self.nodes[nid].root = nid
-      self.node_id_gen = self.node_id_gen + 1
-      for ri in range(len(jpath)):
-        self.nodes[nid].sol.AddPath(ri,jpath[ri][0],jpath[ri][1])
-      cvec = self.ComputeNodeCostObject(self.nodes[nid]) # update node cost vec and return cost vec
-
-      self.open_by_tree[nid] = cm.PrioritySet()
-
-      if OPEN_ADD_MODE == 1:
-        self.open_list.add(np.sum(cvec),nid)
-        self.open_by_tree[nid].add(np.sum(cvec), nid)
-      elif OPEN_ADD_MODE == 2:
-        self.open_list.add(tuple(cvec),nid)
-        self.open_by_tree[nid].add(tuple(cvec), nid)
-  
-    return 1
 
   def PathDictLexSort(self, path_dict, cvec_dict):
     """
@@ -461,7 +669,7 @@ class MocbsSearch:
       return False, -1
 
     nid = self.node_id_gen
-    self.nodes[nid] = copy.deepcopy(MocbsNode(nid, np.zeros(self.cdim)))
+    self.nodes[nid] = copy.deepcopy(MocbsNode(nid, np.zeros(self.cdim), self.num_robots))
     self.nodes[nid].root = nid
     self.node_id_gen = self.node_id_gen + 1
     self.root_generated = self.root_generated + 1 
@@ -543,7 +751,8 @@ class MocbsSearch:
       self.open_list.remove(popped[1])
     else:
       popped = self.open_list.pop() # pop_node = (f-value, high-level-node-id)
-    
+
+    print(popped)
     return True, popped
 
   def SelectNode_OnDemand(self):
@@ -574,132 +783,9 @@ class MocbsSearch:
 
     return True, popped
 
-  def Search(self, search_limit):
-    """
-    high level search
-    """
-    ########################################################
-    #### init search ####
-    ########################################################
-    self.tstart = time.perf_counter()
-    if (self.expansion_mode == 0 or self.expansion_mode == 1):
-      init_success = self.InitSearch()
-    else:
-      init_success = self.InitSearch_OnDemand()
 
-    find_first_feasible_sol = False
-    first_sol = []
-    first_sol_gvec = []
-
-    if init_success == 0:
-      output_res = ( int(len(self.closed_set)), dict(), 0, \
-        float(time.perf_counter()-self.tstart), 0, int(self.num_roots), \
-        int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
-        float(self.total_low_level_time), int(self.num_low_level_calls) )
-      return dict(), output_res
-    
-    search_success = False
-    best_g_value = -1
-    reached_goal_id = -1
-
-    # the following few lines is useful when self.expansion_mode == 1, init self.curr_root
-    for k in self.open_by_tree:
-      self.curr_root = k
-      break
-
-    ########################################################
-    #### init search, END ####
-    ########################################################
-    while True :
-      tnow = time.perf_counter()
-      rd = len(self.closed_set)
-      if (rd > search_limit) or (tnow - self.tstart > self.time_limit):
-        search_success = False
-        break
-      ########################################################
-      #### pop a non-dominated from OPEN ####
-      ########################################################
-      pop_succeed = False
-      popped = []
-      if (self.expansion_mode == 0 or self.expansion_mode == 1):
-        pop_succeed, popped = self.SelectNode()
-      else:
-        pop_succeed, popped = self.SelectNode_OnDemand()
-
-      if not pop_succeed:
-        break
-      if self.GoalFilterNode(popped[1]):
-        continue
-      ########################################################
-      #### pop a non-dominated from OPEN, END ####
-      ########################################################
-
-      ########################################################
-      #### Expand a node ####
-      ########################################################
-      self.closed_set.add(popped[1]) # only used to count numbers
-      curr_node = self.nodes[popped[1]]
-      cstrs = self.FirstConflict(curr_node)
-
-      if len(cstrs) == 0: # no conflict, find a sol !!
-        if not find_first_feasible_sol:
-          find_first_feasible_sol = True
-          first_sol = copy.deepcopy(curr_node)
-          first_sol_gvec = curr_node.cvec
-        self.RefineNondomGoals(curr_node.id)
-        self.nondom_goal_nodes.add(curr_node.id)
-        continue # keep going
-
-      for cstr in cstrs:
-        new_id = self.node_id_gen
-        self.node_id_gen = self.node_id_gen + 1
-        self.nodes[new_id] = copy.deepcopy(curr_node)
-        self.nodes[new_id].id = new_id
-        self.nodes[new_id].parent = curr_node.id
-        self.nodes[new_id].cstr = cstr
-        ri = cstr.i
-        sstats = self.Lsearch(new_id) # this can generate multiple nodes
-        self.UpdateStats(sstats)
-        if sstats[2] == 0:
-          # this branch fails, robot ri cannot find a consistent path.
-          continue
-        # node insertion into OPEN is done in Lsearch()
-      ########################################################
-      #### Expand a node, END ####
-      ########################################################
-      # end of for
-    # end of while
-
-    all_path_set = dict()
-    all_cost_vec = dict()
-    for nid in self.nondom_goal_nodes:
-      hnode = self.nodes[nid]
-      all_path_set[hnode.id] = hnode.sol.paths
-      all_cost_vec[hnode.id] = hnode.cvec
-    if (self.open_list.size() == 0) and (len(self.nondom_goal_nodes) > 0) and (self.root_generated == self.num_roots):
-      search_success = True
-
-    output_res = ( int(len(self.closed_set)), all_cost_vec, int(search_success), \
-      float(time.perf_counter()-self.tstart), int(self.num_closed_low_level_states), \
-      int(self.num_roots), int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
-      float(self.total_low_level_time), int(self.num_low_level_calls) )
-
-    return all_path_set, output_res
-
-def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps, search_limit, time_limit, expansion_mode=2):
-  """
-  sx,sy = starting x,y coordinates of agents.
-  gx,gy = goal x,y coordinates of agents.
-  cdim = M, cost dimension.
-  cvecs = cost vectors of agents, the kth component is a cost vector of length M for agent k.
-  cost_grids = a tuple of M matrices, the mth matrix is a scaling matrix for the mth cost dimension.
-  cost for agent-i to go through an edge c[m] = cvecs[i][m] * cgrids[m][vy,vx], where vx,vy are the target node of the edge.
-  w, eps are not in use! Make w=1, eps=0.
-  search_limit is the maximum rounds of expansion allowed. set it to np.inf if you don't want to use.
-  time_limit is the maximum amount of time allowed for search (in seconds), typically numbers are 60, 300, etc.
-  expansion_mode = 0, MO-CBS
-  expansion_mode = 2, MO-CBS-t (treewise expansion), default.
-  """
+def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim,
+                 search_limit, time_limit, expansion_mode=2, use_cost_bound = False):
   if expansion_mode == 2:
     print("... Run MO-CBS-t ... ")
   elif expansion_mode == 0:
@@ -715,7 +801,7 @@ def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps, search_
   for idx in range(cdim):
     truncated_cgrids.append(cost_grids[idx])
 
-  mocbs = MocbsSearch(grids, sx, sy, gx, gy, truncated_cvecs, truncated_cgrids, expansion_mode, time_limit)
+  mocbs = MocbsSearch(grids, sx, sy, gx, gy, truncated_cvecs,
+                      truncated_cgrids, expansion_mode, time_limit, use_cost_bound=use_cost_bound)
 
   return mocbs.Search(search_limit)
-  
