@@ -346,7 +346,7 @@ class MoSTAstar:
     self.AddToFrontier(self.s_o)
     return
     
-  def Search(self, search_limit=100000, time_limit=10):
+  def Search(self, search_limit=100000, time_limit=10, cost_upper_bound=np.inf):
     if DEBUG_MOSTASTAR:
       print(" MOSTA* Search begin ")
     self.time_limit = time_limit
@@ -406,7 +406,7 @@ class MoSTAstar:
       output_res = ( int(rd), dict(), int(search_success), float(time.perf_counter()-tstart) )
       return dict(), output_res
 
-def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_limit, time_limit, use_same_cost_grid=False, node_cstrs=[], swap_cstrs=[]):
+def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_limit, time_limit, use_same_cost_grid=False, node_cstrs=[], swap_cstrs=[], cost_upper_bound=np.inf):
   if DEBUG_MOSTASTAR:
     print("...RunMoSTAstar... ")
     print("sx:",sx," sy:",sy, " gx:",gx, " gy:",gy)
@@ -423,4 +423,4 @@ def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_l
     mosta.AddNodeConstr(node_cstr[0], node_cstr[1])
   for swap_cstr in swap_cstrs:
     mosta.AddSwapConstr(swap_cstr[0], swap_cstr[1], swap_cstr[2])
-  return mosta.Search(search_limit, time_limit)
+  return mosta.Search(search_limit, time_limit, cost_upper_bound)

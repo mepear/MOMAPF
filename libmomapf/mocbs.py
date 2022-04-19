@@ -220,6 +220,7 @@ class MocbsSearch:
     ########################################################
     #### init search ####
     ########################################################
+    search_complete = True
     self.tstart = time.perf_counter()
     if (self.expansion_mode == 0 or self.expansion_mode == 1):
       init_success = self.InitSearch()
@@ -231,13 +232,13 @@ class MocbsSearch:
     first_sol_gvec = []
 
     if init_success == 0:
+      search_complete = False
       output_res = (int(len(self.closed_set)), dict(), 0, \
                     float(time.perf_counter() - self.tstart), 0, int(self.num_roots), \
                     int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
                     float(self.total_low_level_time), int(self.num_low_level_calls))
-      return dict(), output_res
+      return False, dict(), output_res, None, None, None, None, None
 
-    search_success = False
     best_g_value = -1
     reached_goal_id = -1
 
@@ -253,13 +254,11 @@ class MocbsSearch:
       tnow = time.perf_counter()
       rd = len(self.closed_set)
       if (rd > search_limit) or (tnow - self.tstart > self.time_limit):
-        search_success = False
+        search_complete = False
         break
       ########################################################
       #### pop a non-dominated from OPEN ####
       ########################################################
-      pop_succeed = False
-      popped = []
       if (self.expansion_mode == 0 or self.expansion_mode == 1):
         pop_succeed, popped = self.SelectNode()
       else:
@@ -321,13 +320,13 @@ class MocbsSearch:
     #               float(time.perf_counter() - self.tstart), int(self.num_closed_low_level_states), \
     #               int(self.num_roots), int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
     #               float(self.total_low_level_time), int(self.num_low_level_calls))
-    time_res = "Time : {}".format(round(time.perf_counter() - self.tstart))
-    open_list_res = "Open List : {}".format(self.open_list.size())
-    close_list_res = "Close List : {}".format(len(self.closed_set))
-    low_level_time = "Low Level Time : {}".format(round(self.total_low_level_time))
-    low_level_calls = "Low Level Calls : {}".format(self.num_low_level_calls)
+    time_res = round(time.perf_counter() - self.tstart)
+    open_list_res = self.open_list.size()
+    close_list_res = len(self.closed_set)
+    low_level_time = round(self.total_low_level_time)
+    low_level_calls = self.num_low_level_calls
 
-    return all_path_set, all_cost_vec, time_res, open_list_res, close_list_res, low_level_time, low_level_calls
+    return search_complete, all_path_set, all_cost_vec, time_res, open_list_res, close_list_res, low_level_time, low_level_calls
 
   def InitSearch(self):
     """
@@ -354,7 +353,17 @@ class MocbsSearch:
           lv.append(pt[0])  # pt is a tuple of 1 element, e.g. (34,)
           lt.append(curr_time)
           curr_time = curr_time + 1
-        self.pareto_idvl_path_dict[ri].append((lv, lt))
+        nlv, nlt = EnforceUnitTimePath(lv, lt)
+        self.pareto_idvl_path_dict[ri].append([nlv, nlt, 0, 0])
+
+      if self.use_cost_bound:
+        self.ComputePathCost(self.pareto_idvl_path_dict[ri], ri)
+        self.pareto_idvl_path_dict[ri].sort(key=ReturnCost)
+        for ind in range(len(self.pareto_idvl_path_dict[ri])):
+          if ind == (len(self.pareto_idvl_path_dict[ri]) - 1):
+            self.pareto_idvl_path_dict[ri][ind][3] = np.inf
+          else:
+            self.pareto_idvl_path_dict[ri][ind][3] = self.pareto_idvl_path_dict[ri][ind + 1][2]
 
       tnow = time.perf_counter()
       if (tnow - self.tstart > self.time_limit):
@@ -372,7 +381,7 @@ class MocbsSearch:
       return 0
     self.num_roots = init_size
 
-    all_combi = list(itt.product(*(self.pareto_idvl_path_dict[ky] for ky in sorted(self.pareto_idvl_path_dict))))
+    all_combi = list(itt.product(*(self.pareto_idvl_path_dict[ky] for ky in self.pareto_idvl_path_dict)))
 
     for jpath in all_combi:
       nid = self.node_id_gen
@@ -380,7 +389,9 @@ class MocbsSearch:
       self.nodes[nid].root = nid
       self.node_id_gen = self.node_id_gen + 1
       for ri in range(len(jpath)):
-        self.nodes[nid].sol.AddPath(ri, jpath[ri][0], jpath[ri][1])
+        self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][1]]
+        self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
+        self.nodes[nid].upper_bound[ri] = jpath[ri][3]
       cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
 
       self.open_by_tree[nid] = cm.PrioritySet()
@@ -479,9 +490,9 @@ class MocbsSearch:
       cid = self.nodes[cid].parent
     return node_cs, swap_cs
 
-  def LsearchPlanner(self, ri, node_cs, swap_cs):
+  def LsearchPlanner(self, ri, node_cs, swap_cs, cost_upper_bound=np.inf):
     path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
-      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), False, node_cs, swap_cs)
+      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), False, node_cs, swap_cs, cost_upper_bound)
     return path_dict, lsearch_stats
 
   def Lsearch(self, nid):
@@ -495,7 +506,10 @@ class MocbsSearch:
     upper_bound = nd.upper_bound[ri]
 
     # call constrained NAMOA*
-    path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs) # replace the following two lines of code.
+    if self.use_cost_bound:
+      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs, upper_bound) # replace the following two lines of code.
+    else:
+      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs)
 
     ct = 0 # count of node generated
     path_list = self.PathDictLexSort(path_dict, lsearch_stats[1]) # enforce order
@@ -701,8 +715,6 @@ class MocbsSearch:
     return 
 
   def UpdateStats(self, stats):
-    """
-    """
     self.num_closed_low_level_states = self.num_closed_low_level_states + stats[0]
     self.total_low_level_time = self.total_low_level_time + stats[3]
     self.num_low_level_calls = self.num_low_level_calls + 1

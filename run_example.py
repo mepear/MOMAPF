@@ -1,9 +1,10 @@
 import context
 import time
+from multiprocessing import Pool
 import re
 
 import numpy as np
-from numpy import random
+import pandas as pd
 import matplotlib.pyplot as plt
 
 import common 
@@ -12,14 +13,14 @@ import moastar # NAMOA*
 import momstar
 
 
-def RunToyExample():
+def Run(index, use_cost_bound=False):
   """
   Run different scenarios
   """
-  f = open(file='benchmark/empty-16-16/empty-16-16-random-2.scen', mode='rb')
-  cost_grids = np.load(file='benchmark/empty-16-16/16-16-random-matrix.npy')
+  f = open(file='./benchmark/empty-16-16/empty-16-16-random-{}.scen'.format(index), mode='rb')
+  cost_grids = np.load(file='./benchmark/empty-16-16/16-16-random-matrix.npy')
 
-  agent_num = 4
+  agent_num = 8
   _ = f.readline()
   datapat = re.compile(b'(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\n')
 
@@ -40,8 +41,9 @@ def RunToyExample():
 
   sx = np.array(sx_list)  # start x = column in grid image
   sy = np.array(sy_list)  # start y = rows in grid image, the kth component corresponds to the kth robot.
-  gy = np.array(gy_list)  # goal y
   gx = np.array(gx_list)  # goal x
+  gy = np.array(gy_list)  # goal y
+
 
   cvecs = np.ones((agent_num, 2))
   cgrids = [cost_grids[2], cost_grids[3]] # the mth component corresponds to the mth objective.
@@ -54,8 +56,8 @@ def RunToyExample():
   ##################################################################
 
   ### Invoke MO-CBS planner ###
-  res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs.RunMocbsMAPF(grids,
-                              sx, sy, gx, gy, cvecs, cgrids, cdim, np.inf, 2000, expansion_mode=0, use_cost_bound=False)
+  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs.RunMocbsMAPF(grids,
+                              sx, sy, gx, gy, cvecs, cgrids, cdim, np.inf, 1500, expansion_mode=0, use_cost_bound=use_cost_bound)
 
   #### Invoke NAMOA* planner ###
   # res = moastar.RunMoAstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 100)
@@ -63,23 +65,37 @@ def RunToyExample():
   #### Invoke MOM* planner ###
   # res = momstar.RunMoMstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 10)
 
-  # print(res_path)
-  print(len(res_cost))
+  print(success)
+  print("Paretal Optimal Paths Number:", len(res_cost))
   print(open_list_res)
-  print(close_list_res)
-  print(low_level_calls)
-  print(low_level_time)
-  print(time_res)
+  print("Number of close list:", close_list_res)
+  print("Number of low level calls:", low_level_calls)
+  print("Total Low Level Time:", low_level_time)
+  print("Total Time:", time_res)
+  # print(res_path)
 
+  df = pd.DataFrame({'success': [], "res_num": [], "close_list_num": [], "low_level_num": [], "time": []})
+  df.to_csv("./benchmark/empty-16-16-result/plot_{}_{}.csv".format(index, int(use_cost_bound)), index=False, sep=',')
+
+  data = [success, len(res_cost), close_list_res, low_level_calls, time_res]
+  df = pd.read_csv('./benchmark/empty-16-16-result/plot_{}_{}.csv'.format(index, int(use_cost_bound)))
+  df.loc[1] = data
+  df.to_csv("./benchmark/empty-16-16-result/plot_{}_{}.csv".format(index, int(use_cost_bound)), index=False, sep=',')
   return
 
 
-def main():
-  RunToyExample()
+def main(index, use_cost_bound):
+  Run(index, use_cost_bound)
   return
 
 
 if __name__ == '__main__':
   print("begin of main")
-  main()
+  pool = Pool(processes=10)
+  for i in range(1, 26):
+    pool.apply_async(main, (i, False, ))
+    pool.apply_async(main, (i, True, ))
+  pool.close()
+  pool.join()
+  # main(1, True)
   print("end of main")
