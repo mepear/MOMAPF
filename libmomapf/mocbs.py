@@ -177,7 +177,7 @@ class MocbsSearch:
   """
   """
   def __init__(self, grids, sx_list, sy_list, gx_list, gy_list, cvecs,
-               cgrids, expansion_mode, time_limit, use_cost_bound=False):
+               cgrids, expansion_mode, time_limit, clist, use_cost_bound=False):
     """
     arg grids is a 2d static grid.
     """
@@ -194,8 +194,9 @@ class MocbsSearch:
     self.cgrids = copy.deepcopy(cgrids) # for multi-dimensional cost.
     self.expansion_mode = expansion_mode
     self.time_limit = time_limit
+    self.clist = clist
 
-    # Search Realted args
+    # Search Related args
     self.nodes = dict() # high level nodes
     self.open_list = cm.PrioritySet()
     self.open_by_tree = dict()
@@ -339,22 +340,14 @@ class MocbsSearch:
       tnow = time.perf_counter()
       time_left = self.time_limit - (tnow - self.tstart)
 
-      single_pareto_path, others = moastar.RunMoAstarSingleAgent(self.grids, self.sx_list[ri], self.sy_list[ri], \
-                                                                 self.gx_list[ri], self.gy_list[ri], self.cvecs[ri],
-                                                                 self.cgrids, self.cdim, \
-                                                                 1.0, 0.0, 1e10, time_left)
-
+      single_pareto_path, others = self.LsearchPlanner(ri, [], [])
       self.pareto_idvl_path_dict[ri] = list()
       for ref_key in single_pareto_path:
-        lv = list()
-        lt = list()
-        curr_time = 0
-        for pt in single_pareto_path[ref_key]:
-          lv.append(pt[0])  # pt is a tuple of 1 element, e.g. (34,)
-          lt.append(curr_time)
-          curr_time = curr_time + 1
+        lv = single_pareto_path[ref_key][0]
+        lt = single_pareto_path[ref_key][1]
         nlv, nlt = EnforceUnitTimePath(lv, lt)
-        self.pareto_idvl_path_dict[ri].append([nlv, nlt, 0, 0])
+        new_dict = [nlv, nlt, 0, 0]
+        self.pareto_idvl_path_dict[ri].append(new_dict)
 
       if self.use_cost_bound:
         self.ComputePathCost(self.pareto_idvl_path_dict[ri], ri)
@@ -375,11 +368,14 @@ class MocbsSearch:
     init_size = 1
     for k in self.pareto_idvl_path_dict:
       init_size = init_size * len(self.pareto_idvl_path_dict[k])
+
+    print("Initialization size:", init_size)
     if (init_size > MOCBS_INIT_SIZE_LIMIT):
       print("[CAVEAT] Too many roots to be generated for MO-CBS. Terminate. (why not use MO-CBS-t?)")
       self.num_roots = init_size
       return 0
     self.num_roots = init_size
+
 
     all_combi = list(itt.product(*(self.pareto_idvl_path_dict[ky] for ky in self.pareto_idvl_path_dict)))
 
@@ -392,6 +388,7 @@ class MocbsSearch:
         self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][1]]
         self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
         self.nodes[nid].upper_bound[ri] = jpath[ri][3]
+        # print((self.nodes[nid].true_lower_bound[ri], self.nodes[nid].upper_bound[ri]))
       cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
 
       self.open_by_tree[nid] = cm.PrioritySet()
@@ -403,6 +400,7 @@ class MocbsSearch:
         self.open_list.add(tuple(cvec), nid)
         self.open_by_tree[nid].add(tuple(cvec), nid)
 
+    print("Finish Initialization")
     return 1
 
   def ComputeNodeCostObject(self, nd):
@@ -410,6 +408,7 @@ class MocbsSearch:
     Given a high level search node, compute the cost of paths in that node.
     """
     out_cost = np.zeros(self.cdim) # init M-dim cost vector
+
     for k in nd.sol.paths: # loop over each individual paths in the solution.
       last_idx = -2
       for idx in range(len(nd.sol.paths[k][0])): # find last loc_id that reach goal (remember, last element in lt is timestamp inf !)
@@ -423,25 +422,51 @@ class MocbsSearch:
         else:
           break
       # find last_idx
-      for idx in range(last_idx):
-        nidx = idx + 1 # next index
-        nloc = nd.sol.paths[k][0][nidx]
-        loc = nd.sol.paths[k][0][idx]
-        ntt = nd.sol.paths[k][1][nidx]
-        tt = nd.sol.paths[k][1][idx]
-        cy = int(np.floor(nloc / self.xd)) # ref x
-        cx = int(nloc % self.xd) # ref y
-        if nloc != loc: # there is a move, not wait in place.
-          for ic in range(self.cdim):
-            out_cost[ic] = out_cost[ic] + self.cvecs[k][ic] * self.cgrids[ic][cy,cx]
-        else: # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
-          out_cost = out_cost + self.cvecs[k]*int(ntt-tt) # np.ones((self.cdim)) # stay in place, fixed energy cost for every robot
+      for dim in range(self.cdim):
+        if self.clist[dim] == 'time':
+          out_cost[dim] += last_idx
+        elif self.clist[dim] == 'turning':
+          indicator = None
+          for idx in range(last_idx):
+            nidx = idx + 1
+            nloc = nd.sol.paths[k][0][nidx]
+            loc = nd.sol.paths[k][0][idx]
+            if (indicator == None) and (nloc != loc):
+              indicator = nloc - loc
+            elif (indicator != None) and (nloc - loc != indicator) and (nloc - loc != 0):
+              if indicator == -(nloc - loc):
+                out_cost[dim] += 2
+              else:
+                out_cost[dim] += 1
+              indicator = nloc - loc
+        elif self.clist[dim] == 'distance':
+          for idx in range(last_idx):
+            nidx = idx + 1  # next index
+            nloc = nd.sol.paths[k][0][nidx]
+            loc = nd.sol.paths[k][0][idx]
+            if nloc != loc:  # there is a move, not wait in place.
+              out_cost[dim] += 1
+        elif self.clist[dim] == 'random':
+          for idx in range(last_idx):
+            nidx = idx + 1 # next index
+            nloc = nd.sol.paths[k][0][nidx]
+            loc = nd.sol.paths[k][0][idx]
+            cy = int(np.floor(nloc / self.xd)) # ref x
+            cx = int(nloc % self.xd) # ref y
+            if nloc != loc: # there is a move, not wait in place.
+              out_cost[dim] = out_cost[dim] + self.cvecs[k][dim] * self.cgrids[dim][cy, cx]
+            else: # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
+              out_cost[dim] = out_cost[dim] + self.cvecs[k][dim] # stay in place, fixed energy cost for every robot
+        else:
+          print("Not Define Such Cost")
+          exit()
+
     nd.cvec = out_cost # update cost in that node
     return out_cost
 
   def ComputePathCost(self, path_list, ri):
     """
-    Give a path list, calculate the first dimension cost
+    Give a path list, calculate the first dimension cost. The path is processed by the enforcing unit time module
     """
     for path in path_list:
       last_idx = -2
@@ -456,18 +481,43 @@ class MocbsSearch:
         else:
           break
       # find last_idx
-      for idx in range(last_idx):
-        nidx = idx + 1  # next index
-        nloc = path[0][nidx]
-        loc = path[0][idx]
-        ntt = path[1][nidx]
-        tt = path[1][idx]
-        cy = int(np.floor(nloc / self.xd))  # ref x
-        cx = int(nloc % self.xd)  # ref y,
-        if nloc != loc:  # there is a move, not wait in place.
-          path[2] += self.cvecs[ri][0] * self.cgrids[0][cy, cx]
-        else:  # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
-          path[2] += self.cvecs[ri][0] * int(ntt - tt)  # np.ones((self.cdim)) # stay in place, fixed energy cost for every robot
+      if self.clist[0] == 'time':
+        path[2] = last_idx
+      elif self.clist[0] == 'turning':
+        indicator = None
+        for idx in range(last_idx):
+          nidx = idx + 1
+          nloc = path[0][nidx]
+          loc = path[0][idx]
+          if (indicator == None) and (nloc != loc):
+            indicator = nloc - loc
+          elif (indicator != None) and (nloc - loc != indicator) and (nloc - loc != 0):
+            if indicator == -(nloc - loc):
+              path[2] += 2
+            else:
+              path[2] += 1
+            indicator = nloc - loc
+      elif self.clist[0] == 'distance':
+        for idx in range(last_idx):
+          nidx = idx + 1  # next index
+          nloc = path[0][nidx]
+          loc = path[0][idx]
+          if nloc != loc:  # there is a move, not wait in place.
+            path[2] += 1
+      elif self.clist[0] == 'random':
+        for idx in range(last_idx):
+          nidx = idx + 1  # next index
+          nloc = path[0][nidx]
+          loc = path[0][idx]
+          cy = int(np.floor(nloc / self.xd))  # ref x
+          cx = int(nloc % self.xd)  # ref y,
+          if nloc != loc:  # there is a move, not wait in place.
+            path[2] += self.cvecs[ri][0] * self.cgrids[0][cy, cx]
+          else:  # robot stay in place. We know it has not reach goal yet. (until reach last_idx-1)
+            path[2] += self.cvecs[ri][0] # stay in place, fixed one energy cost for every robot
+      else:
+        print("Not Define Such Cost")
+        exit()
     return
 
   def BacktrackCstrs(self, nid):
@@ -492,7 +542,7 @@ class MocbsSearch:
 
   def LsearchPlanner(self, ri, node_cs, swap_cs, cost_upper_bound=np.inf):
     path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
-      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), False, node_cs, swap_cs, cost_upper_bound)
+      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), self.clist, False, node_cs, swap_cs, cost_upper_bound)
     return path_dict, lsearch_stats
 
   def Lsearch(self, nid):
@@ -507,7 +557,7 @@ class MocbsSearch:
 
     # call constrained NAMOA*
     if self.use_cost_bound:
-      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs, upper_bound) # replace the following two lines of code.
+      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs, upper_bound)
     else:
       path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs)
 
@@ -528,7 +578,7 @@ class MocbsSearch:
       cost_list = []
       for i in new_path_list:
         cost_list.append(i[2])
-      print(cost_list, true_lower_bound, upper_bound)
+      # print(cost_list, true_lower_bound, upper_bound)
 
     for k in range(len(path_list)): # loop over all individual Pareto paths
       if self.use_cost_bound:
@@ -538,15 +588,18 @@ class MocbsSearch:
           new_nd = copy.deepcopy(self.nodes[nid])
           new_nd.upper_bound[ri] = upper_bound
           new_nd.true_lower_bound[ri] = max([true_lower_bound, path_list[k][2]])
+          # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
         elif path_list[k][2] > true_lower_bound:
           new_nd = copy.deepcopy(self.nodes[nid])
           new_nd.true_lower_bound[ri] = path_list[k][2]
           new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
+          # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
         elif path_list[k][2] <= true_lower_bound:
           if path_list[k+1][2] > true_lower_bound:
             new_nd = copy.deepcopy(self.nodes[nid])
             new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
             new_nd.true_lower_bound[ri] = true_lower_bound
+            # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
           else:
             continue
       else:
@@ -797,7 +850,7 @@ class MocbsSearch:
 
 
 def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim,
-                 search_limit, time_limit, expansion_mode=2, use_cost_bound = False):
+                 search_limit, time_limit, clist, expansion_mode=2, use_cost_bound=False):
   if expansion_mode == 2:
     print("... Run MO-CBS-t ... ")
   elif expansion_mode == 0:
@@ -814,6 +867,6 @@ def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim,
     truncated_cgrids.append(cost_grids[idx])
 
   mocbs = MocbsSearch(grids, sx, sy, gx, gy, truncated_cvecs,
-                      truncated_cgrids, expansion_mode, time_limit, use_cost_bound=use_cost_bound)
+                      truncated_cgrids, expansion_mode, time_limit, clist, use_cost_bound=use_cost_bound)
 
   return mocbs.Search(search_limit)

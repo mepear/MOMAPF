@@ -51,7 +51,7 @@ class MoAstarMAPFBase:
   MoAstarMAPF, no heuristic.
   This class is a base class.
   """
-  def __init__(self, grids, sx, sy, gx, gy, cvecs, cost_grids, w, eps, time_limit):
+  def __init__(self, grids, sx, sy, gx, gy, cvecs, cost_grids, w, eps, time_limit, clist):
     """
     NAMOA* algorithm.
     cvecs e.g. = [np.array(1,2),np.array(3,4),np.array(1,5)] means 
@@ -66,6 +66,7 @@ class MoAstarMAPFBase:
     self.num_robots = len(sx)
     self.state_gen_id = 3 # 1 is start, 2 is goal
     self.cost_grids = copy.deepcopy(cost_grids)
+    self.clist = clist
 
     # start state
     self.sx = copy.deepcopy(sx)
@@ -592,7 +593,7 @@ def RunMoAstarMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps, searc
   moa = MoAstarMAPF(grids, sx, sy, gx, gy, truncated_cvecs, truncated_cgrids, w, eps, time_limit, True)
   return moa.Search(search_limit)
 
-def RunMoAstarSingleAgent(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps, search_limit, time_limit):
+def RunMoAstarSingleAgent(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps, search_limit, time_limit, clist):
   """
   Wrap up MoAstarMAPFBase class as a function to compute for single agent multi-objective graph search.
   This is essentially NAMOA* algorithm. See RunMoAstarMAPF for info about input args.
@@ -602,5 +603,5 @@ def RunMoAstarSingleAgent(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim, w, eps
   truncated_cvecs.append(cvecs[0:cdim])
   for idx in range(cdim):
     truncated_cgrids.append(cost_grids[idx])
-  moa = MoAstarMAPFBase(grids, [sx], [sy], [gx], [gy], truncated_cvecs, truncated_cgrids, w, eps, time_limit)
+  moa = MoAstarMAPFBase(grids, [sx], [sy], [gx], [gy], truncated_cvecs, truncated_cgrids, w, eps, time_limit, clist)
   return moa.Search(search_limit)

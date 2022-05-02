@@ -24,12 +24,13 @@ class MoSTAstarState:
   """
   Search state for MOSTA*
   """
-  def __init__(self, sid, loc, cost_vec, t):
+  def __init__(self, sid, loc, cost_vec, t, indicator=None):
     """
     State for single agent MOA* search support ST constraints.
     """
     self.id = sid
     self.loc = loc # location id
+    self.indicator = indicator
     self.cost_vec = cost_vec # M-dimensional objective space.
     self.t = t #
   
@@ -43,13 +44,11 @@ class MoSTAstar:
   """
   NAMOA* search in time-augmented graph.
   """
-  def __init__(self, grids, sx, sy, gx, gy, cvec, cost_grids, w=1.0, eps=0.0, action_set_x = [-1,0,1,0,0], action_set_y = [0,-1,0,1,0]):
+  def __init__(self, grids, sx, sy, gx, gy, clist, cvec, cost_grids, w=1.0, eps=0.0, action_set_x = [-1,0,1,0,0], action_set_y = [0,-1,0,1,0]):
     """
     Multi-Objective Astar algorithm.
-    cvecs e.g. = [np.array(1,2),np.array(3,4),np.array(1,5)] means 
-      robot 1 has cost (1,2) over every edge, 
-      robot 2 has cost (3,4) over every edge and 
-      robot 3 has cost (1,5) over every edge.
+    cvecs e.g. = [np.array(1,5)] means
+    this robot has cost (1,5) over every edge.
     """
     self.grids = grids
     (self.nyt, self.nxt) = self.grids.shape
@@ -57,6 +56,7 @@ class MoSTAstar:
     self.cdim = len(cvec)
     self.state_gen_id = 3 # 1 is start, 2 is goal
     self.cost_grids = cost_grids
+    self.clist = clist
     # start state
     self.sx = sx
     self.sy = sy
@@ -64,7 +64,7 @@ class MoSTAstar:
     # goal state
     self.gx = gx
     self.gy = gy
-    self.s_f = MoSTAstarState(2,self.gy*self.nxt+self.gx,np.array([TIME_MAX for i in range(self.cdim)]),-1)
+    self.s_f = MoSTAstarState(2,self.gy*self.nxt+self.gx,np.array([TIME_MAX for _ in range(self.cdim)]),-1)
     # search params and data structures
     self.weight = w
     self.eps = eps
@@ -82,8 +82,161 @@ class MoSTAstar:
       # a dict that maps a vertex id to a list of forbidden timestamps
     self.swap_constr = dict()
       # a dict that maps a vertex id to a dict with (forbidden time, set(forbidden next-vertex)) as key-value pair.
+    self.perfect_heuristic = [None for _ in range(self.cdim)]
 
     return
+
+  def PerfectHeuristic(self):
+
+    for idx in range(self.cdim):
+      if self.clist[idx] == 'random':
+        found_dict = {self.s_f.loc : 0}
+        not_found_dict = dict()
+        action_x = [1, 0, -1, 0]
+        action_y = [0, 1, 0, -1]
+        location = self.s_f.loc
+        cy = int(np.floor(location / self.nxt))
+        cx = int(location % self.nxt)
+        while True:
+          for i in range(4):
+            cy_temp = cy + action_y[i]
+            cx_temp = cx + action_x[i]
+            location_temp = cy_temp * self.nxt + cx_temp
+            if (cx_temp >= self.nxt) or (cx_temp < 0) or (cy_temp >= self.nyt) or (cy_temp < 0):
+              continue
+            if self.grids[cy_temp, cx_temp] > 0:
+              continue
+            if location_temp in found_dict:
+              continue
+            elif location_temp not in not_found_dict:
+              not_found_dict[location_temp] = found_dict[location] + self.cost_vec[idx] * self.cost_grids[idx][cy, cx]
+            else:
+              not_found_dict[location_temp] = min(found_dict[location] + self.cost_vec[idx] * self.cost_grids[idx][cy, cx], not_found_dict[location_temp])
+          # End for
+          location = min(not_found_dict,key=lambda x:not_found_dict[x])
+          cy = int(np.floor(location / self.nxt))
+          cx = int(location % self.nxt)
+          found_dict[location] = not_found_dict[location]
+          not_found_dict.pop(location)
+          if not not_found_dict:
+            break
+        self.perfect_heuristic[idx] = found_dict
+      elif self.clist[idx] == 'time' or 'distance':
+        found_dict = {self.s_f.loc : 0}
+        not_found_dict = dict()
+        action_x = [1, 0, -1, 0]
+        action_y = [0, 1, 0, -1]
+        location = self.s_f.loc
+        cy = int(np.floor(location / self.nxt))
+        cx = int(location % self.nxt)
+        while True:
+          for i in range(4):
+            cy_temp = cy + action_y[i]
+            cx_temp = cx + action_x[i]
+            location_temp = cy_temp * self.nxt + cx_temp
+            if (cx_temp >= self.nxt) or (cx_temp < 0) or (cy_temp >= self.nyt) or (cy_temp < 0):
+              continue
+            if self.grids[cy_temp, cx_temp] > 0:
+              continue
+            if location_temp in found_dict:
+              continue
+            elif location_temp not in not_found_dict:
+              not_found_dict[location_temp] = found_dict[location] + self.cost_vec[idx]
+            else:
+              not_found_dict[location_temp] = min(found_dict[location] + self.cost_vec[idx], not_found_dict[location_temp])
+          # End for
+          location = min(not_found_dict,key=lambda x:not_found_dict[x])
+          cy = int(np.floor(location / self.nxt))
+          cx = int(location % self.nxt)
+          found_dict[location] = not_found_dict[location]
+          not_found_dict.pop(location)
+          if not not_found_dict:
+            break
+        self.perfect_heuristic[idx] = found_dict
+      elif self.clist[idx] == 'turning': # TODO : This heuristic need to have a change
+        found_dict = dict()
+        for x_idx in range(self.nxt):
+          for y_idx in range(self.nyt):
+            if self.grids[y_idx, x_idx] == 0:
+              found_dict[y_idx * self.nxt + x_idx] = 0
+        self.perfect_heuristic[idx] = found_dict
+      else:
+        print("Do not define such cost")
+        exit()
+    return
+
+  def InitSearch(self):
+    """
+    move part of the code to this func, to make it easy to be derived from.
+    """
+    self.PerfectHeuristic()
+    self.s_o.t = 0
+    self.all_visited_s[self.s_o.id] = self.s_o
+    self.f_value[self.s_o.id] = self.s_o.cost_vec + self.GetHeuristic(self.s_o)
+    self.open_list.add(np.sum(self.f_value[self.s_o.id]), self.s_o.id)
+    self.AddToFrontier(self.s_o)
+    return
+
+  def Search(self, search_limit=100000, time_limit=10, cost_upper_bound=np.inf):
+    if DEBUG_MOSTASTAR:
+      print(" MOSTA* Search begin ")
+    self.time_limit = time_limit
+    tstart = time.perf_counter()
+    self.InitSearch()
+    search_success = True
+    rd = 0
+    while (True):
+      tnow = time.perf_counter()
+      rd = rd + 1
+      if (rd > search_limit) or (tnow - tstart > self.time_limit):
+        print(" Fail! timeout! ")
+        search_success = False
+        break
+      if (self.open_list.size()) == 0:
+        search_success = True
+        break
+      pop_node = self.open_list.pop()  # (sum(f), sid)
+      curr_s = self.all_visited_s[pop_node[1]]
+      # filter state
+      if self.FilterState(curr_s, self.f_value[curr_s.id], cost_upper_bound):
+        continue
+      if self.CheckReachGoal(curr_s):
+        self.reached_goal_states.add(curr_s.id)
+        self.RefineGoalReached(curr_s)
+      # get neighbors
+      ngh_ss, ngh_success = self.GetNeighbors(curr_s, tnow)
+      if not ngh_success:
+        search_success = False
+        break
+      # loop over neighbors
+      for idx in range(len(ngh_ss)):
+        ngh_s = ngh_ss[idx]
+        h_array = self.GetHeuristic(ngh_s)
+        f_array = ngh_s.cost_vec + self.weight * h_array
+        if self.FilterState(ngh_s, f_array, cost_upper_bound):
+          continue
+        if (not self.Pruning(ngh_s, f_array)):
+          self.AddToFrontier(ngh_s)
+          self.backtrack_dict[ngh_s.id] = curr_s.id
+          self.f_value[ngh_s.id] = ngh_s.cost_vec + self.weight * h_array
+          self.open_list.add(np.sum(self.f_value[ngh_s.id]) + ngh_s.t, ngh_s.id)
+        else:
+          if DEBUG_MOSTASTAR:
+            print(" XX dom pruned XX ")
+    if search_success:
+      # output jpath is in reverse order, from goal to start
+      all_path = self.ReconstructPathAll()
+      all_cost_vec = dict()
+      for k in all_path:
+        all_cost_vec[k] = self.all_visited_s[k].cost_vec
+      if len(all_path) == 0:  # @2021-04-30, this can leads to error in the derived class like MO-SIPP, MO-SIPP-landmark
+        search_success = 0
+      output_res = (int(rd), all_cost_vec, int(search_success), float(time.perf_counter() - tstart))
+      print("Number nodes:", output_res[0], "Times:", output_res[3])
+      return all_path, output_res
+    else:
+      output_res = (int(rd), dict(), int(search_success), float(time.perf_counter() - tstart))
+      return dict(), output_res
 
   def AddNodeConstr(self, nid, t):
     """
@@ -138,34 +291,63 @@ class MoSTAstar:
     # cy = int(np.floor(s.loc/self.nxt)) 
     # cx = int(s.loc%self.nxt) 
     # return ( abs(cy-self.gy) + abs(cx - self.gx) ) * np.ones(self.cdim)
-    
-    # no heuristic
-    return np.zeros(self.cdim)
 
-  def GetCost(self, loc, nloc, dt=1):
+    # Perfect Heuristic (Without constrain)
+    heuristic = np.zeros(self.cdim)
+    for i in range(self.cdim):
+      heuristic[i] = self.perfect_heuristic[i][s.loc]
+    # no heuristic
+    return heuristic
+
+  def GetCost(self, s, nloc, dt=1):
     """
     Get M-dimenisonal cost vector of moving from loc to nloc.
     """
     out_cost = np.zeros(self.cdim)
-    if nloc != loc: # there is a move, not wait in place.
-      if len(self.cost_grids) > 0 and len(self.cost_grids) >= self.cdim : # there is cost_grid, use it.
-        cy = int(np.floor(nloc/self.nxt)) # ref y
-        cx = int(nloc%self.nxt) # ref x, 
-        for ic in range(self.cdim):
-          out_cost[ic] = out_cost[ic] + self.cost_vec[ic]*self.cost_grids[ic][cy,cx]
-      else: # there is no cost_grid, no use
-        out_cost = out_cost + self.cost_vec
-    else: # robot stay in place.
-      if loc != self.s_f.loc:
-        out_cost = out_cost + self.cost_vec
-    out_cost = out_cost + (dt-1)*self.cost_vec
-    return out_cost
+    indicator = None
+    for idx in range(self.cdim):
+      if self.clist[idx] == 'random':
+        if nloc != s.loc: # there is a move, not wait in place.
+          if len(self.cost_grids) >= self.cdim : # there is cost_grid, use it.
+            cy = int(np.floor(nloc/self.nxt)) # ref y
+            cx = int(nloc%self.nxt) # ref x,
+            out_cost[idx] = out_cost[idx] + self.cost_vec[idx]*self.cost_grids[idx][cy,cx]
+          else: # there is no cost_grid, no use
+            out_cost[idx] = out_cost[idx] + self.cost_vec[idx]
+        else: # robot stay in place.
+          if s.loc != self.s_f.loc:
+            out_cost[idx] = out_cost[idx] + self.cost_vec[idx]
+      elif self.clist[idx] == 'time':
+        if s.loc != self.s_f.loc:
+          out_cost[idx] += 1
+      elif self.clist[idx] == 'distance':
+        if nloc != s.loc:
+          out_cost[idx] += 1
+      elif self.clist[idx] == 'turning':
+        if nloc != s.loc:
+          if s.indicator == None or s.indicator == nloc - s.loc:
+            pass
+          elif s.indicator == -(nloc - s.loc):
+            out_cost[idx] += 2
+          else:
+            out_cost[idx] += 1
+          indicator = nloc - s.loc
+        else:
+          indicator = s.indicator
+      else:
+        print("Do not define such cost")
+        exit()
+
+    return out_cost, indicator
 
   def GetStateIdentifier(self, s):
     """
     return an identifier of state, such as a tuple of (nid, t), which characterize frontiers.
     """
-    return (s.loc, s.t)
+    if 'turning' in self.clist:
+      return (s.loc, s.t, s.indicator)
+    else:
+      return (s.loc, s.t)
 
   def CheckReachGoal(self, s):
     """
@@ -208,14 +390,24 @@ class MoSTAstar:
         self.open_list.remove(sid)
     return
 
-  def FilterState(self,s,f_array):
+  def FilterState(self, s, f_array, cost_upper_bound):
+    if self.AboveCostBound(f_array, cost_upper_bound):
+      return True
     if self.FrontierFilterState(s,f_array):
       return True
     if self.GoalFilterState(s,f_array):
       return True
     return False
 
-  def FrontierFilterState(self,s,f_array):
+  def AboveCostBound(self, f_array, cost_upper_bound):
+    """
+    filter state s, if the first dimension of the cost is higher than upper bound
+    """
+    if f_array[0] >= cost_upper_bound:
+      return True
+    return False
+
+  def FrontierFilterState(self, s, f_array):
     """
     filter state s, if s is dominated by any states in frontier other than s.
     """
@@ -231,7 +423,7 @@ class MoSTAstar:
         return True # filtered
     return False # not filtered
 
-  def GoalFilterState(self,s,f_array):
+  def GoalFilterState(self, s, f_array):
     """
     filter state s, if s is dominated by any states that reached goal. (non-negative cost vec).
     """
@@ -242,7 +434,7 @@ class MoSTAstar:
         return True # filtered
     return False # not filtered
 
-  def RefineGoalReached(self,s):
+  def RefineGoalReached(self, s):
     """
     """
     temp_set = copy.deepcopy(self.reached_goal_states)
@@ -277,19 +469,20 @@ class MoSTAstar:
     for action_idx in range(len(self.action_set_x)):
       nx = cx+self.action_set_x[action_idx] # next x
       ny = cy+self.action_set_y[action_idx] # next y 
-      nnid = ny*self.nxt+nx
+      nloc = ny*self.nxt+nx
       if (nx >= self.nxt) or (nx < 0) or (ny >= self.nyt) or (ny < 0): # out of border of grid
         continue
       if (self.grids[ny,nx] > 0): # static obstacle
         continue
       # check swap conflict
       if (s.loc in self.swap_constr) and (s.t in self.swap_constr[s.loc]) \
-          and (nnid in self.swap_constr[s.loc][s.t]):
+          and (nloc in self.swap_constr[s.loc][s.t]):
         continue # robot is not allowed to transite to nnid at this time 
                  # due to swap constraints!
       if self.IfNodeOccupied(s.loc, s.t): # node constraint violated !! continue !!
         continue
-      ns = MoSTAstarState(self.state_gen_id, nnid, s.cost_vec+self.GetCost(s.loc,nnid,1), s.t+1)
+      out_cost, indicator = self.GetCost(s,nloc,1)
+      ns = MoSTAstarState(self.state_gen_id, nloc, s.cost_vec+out_cost, s.t+1, indicator=indicator)
       self.state_gen_id = self.state_gen_id + 1 
       s_ngh.append(ns)
 
@@ -335,82 +528,14 @@ class MoSTAstar:
       traj_all[int(sid)] = self.ReconstructPath(sid)
     return traj_all
   
-  def InitSearch(self):
-    """
-    move part of the code to this func, to make it easy to be derived from.
-    """
-    self.s_o.t = 0
-    self.all_visited_s[self.s_o.id] = self.s_o
-    self.f_value[self.s_o.id] = self.s_o.cost_vec + self.GetHeuristic(self.s_o)
-    self.open_list.add(np.sum(self.f_value[self.s_o.id]), self.s_o.id)
-    self.AddToFrontier(self.s_o)
-    return
-    
-  def Search(self, search_limit=100000, time_limit=10, cost_upper_bound=np.inf):
-    if DEBUG_MOSTASTAR:
-      print(" MOSTA* Search begin ")
-    self.time_limit = time_limit
-    tstart = time.perf_counter()
-    self.InitSearch()
-    search_success = True
-    rd = 0
-    while(True):
-      tnow = time.perf_counter()
-      rd = rd + 1
-      if (rd > search_limit) or (tnow - tstart > self.time_limit):
-        print(" Fail! timeout! ")
-        search_success = False
-        break
-      if (self.open_list.size()) == 0:
-        search_success = True
-        break
-      pop_node = self.open_list.pop() # ( sum(f), sid )
-      curr_s = self.all_visited_s[pop_node[1]]
-      # filter state
-      if self.FilterState(curr_s, self.f_value[curr_s.id]):
-        continue
-      if self.CheckReachGoal(curr_s): 
-        self.reached_goal_states.add(curr_s.id)
-        self.RefineGoalReached(curr_s)
-      # get neighbors
-      ngh_ss, ngh_success = self.GetNeighbors(curr_s, tnow)
-      if not ngh_success:
-        search_success = False
-        break
-      # loop over neighbors
-      for idx in range(len(ngh_ss)):
-        ngh_s = ngh_ss[idx]
-        h_array = self.GetHeuristic(ngh_s)
-        f_array = ngh_s.cost_vec + self.weight*h_array
-        if self.FilterState(ngh_s, f_array):
-          continue
-        if (not self.Pruning(ngh_s, f_array)):
-          self.AddToFrontier(ngh_s)
-          self.backtrack_dict[ngh_s.id] = curr_s.id
-          self.f_value[ngh_s.id] = ngh_s.cost_vec + self.weight*h_array
-          self.open_list.add(np.sum(self.f_value[ngh_s.id]), ngh_s.id)
-        else:
-          if DEBUG_MOSTASTAR:
-            print(" XX dom pruned XX ")
-    if search_success:
-      # output jpath is in reverse order, from goal to start
-      all_path = self.ReconstructPathAll()
-      all_cost_vec = dict()
-      for k in all_path:
-        all_cost_vec[k] = self.all_visited_s[k].cost_vec
-      if len(all_path) == 0: # @2021-04-30, this can leads to error in the derived class like MO-SIPP, MO-SIPP-landmark
-        search_success = 0
-      output_res = ( int(rd), all_cost_vec, int(search_success), float(time.perf_counter()-tstart) )
-      return all_path, output_res
-    else:
-      output_res = ( int(rd), dict(), int(search_success), float(time.perf_counter()-tstart) )
-      return dict(), output_res
 
-def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_limit, time_limit, use_same_cost_grid=False, node_cstrs=[], swap_cstrs=[], cost_upper_bound=np.inf):
+def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_limit, time_limit, clist, use_same_cost_grid=False,
+                 node_cstrs=[], swap_cstrs=[], cost_upper_bound=np.inf):
   if DEBUG_MOSTASTAR:
     print("...RunMoSTAstar... ")
     print("sx:",sx," sy:",sy, " gx:",gx, " gy:",gy)
     print("node_cstrs:", node_cstrs, " swap_cstrs:", swap_cstrs)
+    print("cost_upper_bound:", cost_upper_bound)
   truncated_cvec = cvec[0:cdim]
   truncated_cgrids = list()
   for idx in range(cdim):
@@ -418,9 +543,10 @@ def RunMoSTAstar(grids, sx, sy, gx, gy, cvec, cost_grids, cdim, w, eps, search_l
       truncated_cgrids.append(cost_grids[0])
     else:
       truncated_cgrids.append(cost_grids[idx])
-  mosta = MoSTAstar(grids, sx,sy,gx,gy, truncated_cvec, truncated_cgrids, w, eps)
+  mosta = MoSTAstar(grids, sx,sy,gx,gy, clist, truncated_cvec, truncated_cgrids, w, eps)
   for node_cstr in node_cstrs:
     mosta.AddNodeConstr(node_cstr[0], node_cstr[1])
   for swap_cstr in swap_cstrs:
     mosta.AddSwapConstr(swap_cstr[0], swap_cstr[1], swap_cstr[2])
-  return mosta.Search(search_limit, time_limit, cost_upper_bound)
+  all_path, output_res = mosta.Search(search_limit, time_limit, cost_upper_bound)
+  return all_path, output_res
