@@ -52,7 +52,7 @@ class LLSolver:
         start = LLNode(self.start, 0, tuple(0 for _ in range(G.num_objective)), self.get_heuristic(self.start))
         open_l = [start]
         # !! DomChecker only works for 2 and 3 objectives
-        closed = [DomChecker() for _ in range(G.num_v)]
+        closed = map()
         sol_dom_checker = DomChecker()
         sols = []
 
@@ -68,10 +68,12 @@ class LLSolver:
                 sol_dom_checker.insert(tr(curr.f_val))
                 continue
 
-            if closed[curr.state].is_dominated(tr(curr.f_val)):
+            if curr.state in closed and closed[curr.state].is_dominated(tr(curr.f_val)):
                 continue
 
-            closed[curr].insert(tr(curr.f_val))
+            if curr.state not in closed:
+                closed[curr.state] = DomChecker()
+            closed[curr.state].insert(tr(curr.f_val))
 
             num_expand += 1
             children = self.get_children(curr)
@@ -80,7 +82,7 @@ class LLSolver:
                     continue
                 if sol_dom_checker.is_dominated(tr(ch.f_val)):
                     continue
-                if closed[ch.state].is_dominated(tr(ch.f_val)):
+                if ch.state in closed and closed[ch.state].is_dominated(tr(ch.f_val)):
                     continue
                 heappush(open_l, ch)
         return sols
