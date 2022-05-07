@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import common 
 import mocbs
 import arguments
+from utils import Map
 import moastar # NAMOA*
 import momstar
 
@@ -63,13 +64,15 @@ def Run(args, index=None, use_bound=None):
   clist = args['cost_name']
   cdim = len(clist)
 
+  G = Map(grids, cgrids, clist)
+
   ##################################################################
   #### choose one of the planner to run by uncommenting the code ###
   ##################################################################
 
   ### Invoke MO-CBS planner ###
-  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs.RunMocbsMAPF(grids,
-                              sx, sy, gx, gy, cvecs, cgrids, cdim, np.inf, 1500, clist, expansion_mode=0, use_cost_bound=use_cost_bound)
+  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs.RunMocbsMAPF(G,
+                              sx, sy, gx, gy, cvecs, cdim, np.inf, 1500, expansion_mode=0, use_cost_bound=use_cost_bound)
 
   #### Invoke NAMOA* planner ###
   # res = moastar.RunMoAstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 100)

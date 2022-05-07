@@ -12,6 +12,9 @@ import common as cm
 import moastar
 import mostastar as mosta
 import itertools as itt
+from copy import deepcopy
+from ll_solver import LLSolver
+from ll_solver import LLNode
 
 ######
 MOCBS_INIT_SIZE_LIMIT = 800*1000
@@ -176,25 +179,25 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, grids, sx_list, sy_list, gx_list, gy_list, cvecs,
-               cgrids, expansion_mode, time_limit, clist, use_cost_bound=False):
+  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, cvecs, expansion_mode, time_limit, use_cost_bound=False):
     """
     arg grids is a 2d static grid.
     """
     ## Instance Related args
-    self.grids = copy.deepcopy(grids)
+    self.grids = G.map
     (self.yd, self.xd) = self.grids.shape
-    self.sx_list = copy.deepcopy(sx_list)
-    self.sy_list = copy.deepcopy(sy_list)
-    self.gx_list = copy.deepcopy(gx_list)
-    self.gy_list = copy.deepcopy(gy_list)
+    self.sx_list = deepcopy(sx_list)
+    self.sy_list = deepcopy(sy_list)
+    self.gx_list = deepcopy(gx_list)
+    self.gy_list = deepcopy(gy_list)
     self.num_robots = len(sx_list)
-    self.cdim = len(cvecs[0])
+    self.cdim = G.num_objective
     self.cvecs = copy.deepcopy(cvecs) # for multi-dimensional cost.
-    self.cgrids = copy.deepcopy(cgrids) # for multi-dimensional cost.
+    self.cgrids = G.cost_grids # for multi-dimensional cost.
     self.expansion_mode = expansion_mode
     self.time_limit = time_limit
-    self.clist = clist
+    self.clist = G.cost_list
+    self.ll_starter_list = [LLSolver(G, sy_list[i] * self.xd + sx_list[i], gy_list[i] * self.xd + self.gx_list[i]) for i in range(self.num_robots)]
 
     # Search Related args
     self.nodes = dict() # high level nodes
@@ -340,7 +343,8 @@ class MocbsSearch:
       tnow = time.perf_counter()
       time_left = self.time_limit - (tnow - self.tstart)
 
-      single_pareto_path, others = self.LsearchPlanner(ri, [], [])
+      # single_pareto_path, others = self.LsearchPlanner(ri, [], [])
+      single_pareto_path = self.ll_starter_list[ri].find_path()
       self.pareto_idvl_path_dict[ri] = list()
       for ref_key in single_pareto_path:
         lv = single_pareto_path[ref_key][0]
@@ -536,9 +540,25 @@ class MocbsSearch:
           node_cs.append( (cstr.vb, cstr.tb) )
         elif self.nodes[cid].cstr.flag == 2: # edge constraint
           swap_cs.append( (cstr.va, cstr.vb, cstr.ta) )
-          node_cs.append( (cstr.va, cstr.tb) ) # since another robot is coming to v=va at t=tb
+          # node_cs.append( (cstr.va, cstr.tb) ) # since another robot is coming to v=va at t=tb
       cid = self.nodes[cid].parent
     return node_cs, swap_cs
+
+  def PreProcess(self, node_cs, swap_cs):
+    swap_dict = dict()
+    for constraint in swap_cs:
+      if constraint[0] not in swap_dict:
+        swap_dict[constraint[0]] = dict()
+      if constraint[2] not in swap_dict[constraint[0]]:
+        swap_dict[constraint[0]][constraint[2]] = set()
+      swap_dict[constraint[0]][constraint[2]].add(constraint[1])
+
+    node_dict = dict()
+    for constraint in node_cs:
+      if constraint[0] not in node_dict:
+        node_dict[constraint[0]] = set()
+      node_dict[constraint[0]].add(constraint[1])
+    return node_dict, swap_dict
 
   def LsearchPlanner(self, ri, node_cs, swap_cs, cost_upper_bound=np.inf):
     path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
@@ -556,13 +576,17 @@ class MocbsSearch:
     upper_bound = nd.upper_bound[ri]
 
     # call constrained NAMOA*
-    if self.use_cost_bound:
-      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs, upper_bound)
-    else:
-      path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs)
 
+    # if self.use_cost_bound:
+    #   path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs, upper_bound)
+    # else:
+    #   path_dict, lsearch_stats = self.LsearchPlanner(ri, node_cs, swap_cs)
+    # path_list = self.PathDictLexSort(path_dict, lsearch_stats[1])  # enforce order
+
+    node_dict, swap_dict = self.PreProcess(node_cs, swap_cs)
+    path_list = self.ll_starter_list[ri].find_path(node_dict, swap_dict)
+    lsearch_stats = [1,1,1,1]
     ct = 0 # count of node generated
-    path_list = self.PathDictLexSort(path_dict, lsearch_stats[1]) # enforce order
 
     # The added part and find cost of each path
     if self.use_cost_bound:
@@ -578,7 +602,7 @@ class MocbsSearch:
       cost_list = []
       for i in new_path_list:
         cost_list.append(i[2])
-      # print(cost_list, true_lower_bound, upper_bound)
+      print(cost_list, true_lower_bound, upper_bound)
 
     for k in range(len(path_list)): # loop over all individual Pareto paths
       if self.use_cost_bound:
@@ -849,8 +873,7 @@ class MocbsSearch:
     return True, popped
 
 
-def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim,
-                 search_limit, time_limit, clist, expansion_mode=2, use_cost_bound=False):
+def RunMocbsMAPF(G, sx, sy, gx, gy, cvecs, cdim, search_limit, time_limit, expansion_mode=2, use_cost_bound=False):
   if expansion_mode == 2:
     print("... Run MO-CBS-t ... ")
   elif expansion_mode == 0:
@@ -864,9 +887,8 @@ def RunMocbsMAPF(grids, sx, sy, gx, gy, cvecs, cost_grids, cdim,
   for idx in range(len(cvecs)):
     truncated_cvecs.append(cvecs[idx][0:cdim])
   for idx in range(cdim):
-    truncated_cgrids.append(cost_grids[idx])
+    truncated_cgrids.append(G.cost_grids[idx])
 
-  mocbs = MocbsSearch(grids, sx, sy, gx, gy, truncated_cvecs,
-                      truncated_cgrids, expansion_mode, time_limit, clist, use_cost_bound=use_cost_bound)
+  mocbs = MocbsSearch(G, sx, sy, gx, gy, truncated_cvecs, expansion_mode, time_limit, use_cost_bound=use_cost_bound)
 
   return mocbs.Search(search_limit)

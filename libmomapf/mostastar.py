@@ -232,7 +232,7 @@ class MoSTAstar:
       if len(all_path) == 0:  # @2021-04-30, this can leads to error in the derived class like MO-SIPP, MO-SIPP-landmark
         search_success = 0
       output_res = (int(rd), all_cost_vec, int(search_success), float(time.perf_counter() - tstart))
-      print("Number nodes:", output_res[0], "Times:", output_res[3])
+      # print("Number nodes:", output_res[0], "Times:", output_res[3])
       return all_path, output_res
     else:
       output_res = (int(rd), dict(), int(search_success), float(time.perf_counter() - tstart))
@@ -268,6 +268,7 @@ class MoSTAstar:
         tlist.append(t)
       tlist.append(self.node_constr[nid][idy])
     self.node_constr[nid] = tlist
+    # print("Node constraints: ", self.node_constr)
     return
 
   def AddSwapConstr(self, nid1, nid2, t):
@@ -279,6 +280,7 @@ class MoSTAstar:
     if t not in self.swap_constr[nid1]:
       self.swap_constr[nid1][t] = set()
     self.swap_constr[nid1][t].add(nid2)
+    # print("Swap Constraints: ", self.swap_constr)
     return
 
   def GetHeuristic(self, s):
