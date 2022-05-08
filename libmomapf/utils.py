@@ -196,3 +196,40 @@ class Map:
                 print("Do not define such cost")
                 exit()
         return perfect_heuristic
+
+    def get_g_val(self, prev_g_val, loc, new_loc, node_constraints):
+
+        out_cost = list(prev_g_val)
+        # indicator = None
+
+        # Calculate cost for single step
+        for idx in range(self.num_objective):
+            if self.cost_list[idx] == 'random':
+                if new_loc != loc:
+                    cy = int(np.floor(new_loc / self.x_length))
+                    cx = int(new_loc % self.x_length)
+                    out_cost[idx] = out_cost[idx] + self.cost_grids[idx][cy, cx]
+                else:
+                    out_cost[idx] = out_cost[idx] + 1
+            elif self.cost_list[idx] == 'time':
+                out_cost[idx] += 1
+            elif self.cost_list[idx] == 'distance':
+                if new_loc != loc:
+                    out_cost[idx] += 1
+            elif self.cost_list[idx] == 'turning':
+                # if new_loc != ll_node.loc:
+                #     if s.indicator == None or s.indicator == new_loc - ll_node.loc:
+                #         pass
+                #     elif s.indicator == -(new_loc - ll_node.loc):
+                #         out_cost[idx] += 2
+                #     else:
+                #         out_cost[idx] += 1
+                #     indicator = new_loc - ll_node.loc
+                # else:
+                #     indicator = s.indicator
+                pass
+            else:
+                print("Do not define such cost")
+                exit()
+
+        return tuple(out_cost)
