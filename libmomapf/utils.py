@@ -4,6 +4,24 @@ def tr(val):
     return val[1:]
 
 
+def is_weakly_dominated(vec1, vec2):
+    for n1, n2 in zip(vec1, vec2):
+        if n1 < n2:
+            return False
+    return True
+
+def is_weakly_dominated_it(vec, vec_list):
+    for vec_2 in vec_list:
+        if is_weakly_dominated(vec, vec_2):
+            return True
+
+    return False
+
+def update_list_it(vec_list, vec):
+    vec_list = [vec] + [v for v in vec_list if not is_weakly_dominated(v, vec)]
+    return vec_list
+
+
 class DomChecker:
     """
     testing:
@@ -233,3 +251,59 @@ class Map:
                 exit()
 
         return tuple(out_cost)
+
+
+
+def comax(v1, v2):
+    # Assumption: v1 and any v2 in V2 only contain non-negative component
+    # V2 is sorted lexicographically
+
+    return tuple(max(n1, n2) for n1, n2 in zip(v1, v2))
+
+def ndcomax(v1, V2):
+    # Assumption: v1 and any v2 in V2 only contain non-negative component
+    # V2 is sorted lexicographically
+
+    res = []
+    tr_vecs = []
+
+    for new_vec in sorted(comax(v1, v2) for v2 in V2):
+#         new_vec = vec_max(v1, v2)
+        if is_weakly_dominated_it(tr(new_vec), tr_vecs):
+            continue
+        res.append(new_vec)
+        tr_vecs = update_list_it(tr_vecs, tr(new_vec))
+
+    return res
+
+def ndcomax_path(v1, V2):
+    # Assumption: v1 and any v2 in V2 only contain non-negative component
+    # V2 is sorted lexicographically
+    # V2 = [(cost1, path1), (cos2, path2) .... ]
+
+
+    res = []
+    tr_vecs = []
+
+    for new_vec in sorted((comax(v1, v2), path) for v2, path in V2):
+#         new_vec = vec_max(v1, v2)
+        if is_weakly_dominated_it(tr(new_vec[0]), tr_vecs):
+            continue
+        res.append(new_vec)
+        tr_vecs = update_list_it(tr_vecs, tr(new_vec[0]))
+
+    return res
+
+
+
+def gen_splitting(lb, ub, paths):
+    prev = []
+
+    for cost, path in ndcomax_path(lb, paths):
+        new_lb = cost
+        new_ub = [comax(u, cost) for u in ub]
+        for p in prev:
+            new_ub = update_list_it(new_ub, comax(p, cost))
+
+        print(f"{path} - {new_lb} - {new_ub}")
+        prev.append(cost)

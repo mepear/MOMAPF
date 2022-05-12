@@ -575,13 +575,8 @@ class MocbsSearch:
     return True, popped
 
 
-def RunMocbsMAPF(G, sx, sy, gx, gy, cvecs, cdim, search_limit, time_limit, expansion_mode=2, use_cost_bound=False):
-  if expansion_mode == 2:
-    print("... Run MO-CBS-t ... ")
-  elif expansion_mode == 0:
-    print("... Run MO-CBS ... ")
-  else:
-    sys.exit("[ERROR] Are you kidding? Unknown expansion mode for MO-CBS!!!")
+def RunMocbsMAPF(G, sx, sy, gx, gy, cvecs, cdim, search_limit, time_limit, use_cost_bound=False):
+  print("... Run MO-CBS ... ")
 
   truncated_cvecs = list()
   truncated_cgrids = list()
