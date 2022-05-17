@@ -7,8 +7,8 @@ for i in name:
         df[i] = []
 
 for i in range(1,26):
-    tmp = pd.read_csv('./benchmark/empty-16-16-result/plot_{}_0.csv'.format(i))
+    tmp = pd.read_csv('./benchmark/empty-16-16-result/plot_{}_1.csv'.format(i))
     data = tmp.loc[0]
     df.loc[i] = data
 
-df.to_csv("./benchmark/empty-16-16-result/plot_no_12_agent.csv", index=False, sep=',')
+df.to_csv("./benchmark/empty-16-16-result/plot_has_12_agent_new.csv", index=False, sep=',')

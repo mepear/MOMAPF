@@ -3,7 +3,6 @@ import numpy as np
 def tr(val):
     return val[1:]
 
-
 def is_weakly_dominated(vec1, vec2):
     for n1, n2 in zip(vec1, vec2):
         if n1 < n2:
@@ -169,7 +168,7 @@ class Map:
                     if not not_found_dict:
                         break
                 perfect_heuristic[idx] = found_dict
-            elif self.cost_list[idx] == 'time' or 'distance':
+            elif self.cost_list[idx] == 'time' or self.cost_list[idx] == 'distance':
                 found_dict = {goal: 0}
                 not_found_dict = dict()
                 action_x = [1, 0, -1, 0]
@@ -202,23 +201,56 @@ class Map:
                     if not not_found_dict:
                         break
                 perfect_heuristic[idx] = found_dict
-            elif self.cost_list[idx] == 'turning':  # TODO : This heuristic need to have a change
-                # found_dict = dict()
-                # for x_idx in range(self.x_length):
-                #     for y_idx in range(self.y_length):
-                #         if self.map[y_idx, x_idx] == 0:
-                #             found_dict[y_idx * self.x_length + x_idx] = 0
-                # perfect_heuristic[idx] = found_dict
-                pass
+            elif self.cost_list[idx] == 'turning':
+                found_dict = {(goal, None): 0}
+                not_found_dict = dict()
+                action_x = [1, 0, -1, 0]
+                action_y = [0, 1, 0, -1]
+                location = goal
+                indicator = None
+                cy = int(np.floor(location / self.x_length))
+                cx = int(location % self.x_length)
+                while True:
+                    for i in range(4):
+                        cy_temp = cy + action_y[i]
+                        cx_temp = cx + action_x[i]
+                        location_temp = cy_temp * self.x_length + cx_temp
+                        if (cx_temp >= self.x_length) or (cx_temp < 0) or (cy_temp >= self.y_length) or (cy_temp < 0):
+                            continue
+                        if self.map[cy_temp, cx_temp] > 0 or (indicator != None and location_temp - location == -indicator):
+                            continue
+                        if (location_temp, location_temp - location) in found_dict:
+                            continue
+                        elif (location_temp, location_temp - location) not in not_found_dict:
+                            if location_temp - location == indicator or indicator == None:
+                                not_found_dict[(location_temp, location_temp - location)] = found_dict[(location, indicator)]
+                            else:
+                                not_found_dict[(location_temp, location_temp - location)] = found_dict[(location, indicator)] + 1
+                        elif location_temp - location == indicator or indicator == None:
+                            not_found_dict[(location_temp, location_temp - location)] = min(found_dict[(location, indicator)],
+                                                                            not_found_dict[(location_temp, location_temp - location)])
+                        else:
+                            not_found_dict[(location_temp, location_temp - location)] = min(found_dict[(location, indicator)] + 1,
+                                                                            not_found_dict[(location_temp, location_temp - location)])
+                    # End for
+                    (location, indicator) = min(not_found_dict, key=lambda x: not_found_dict[x])
+                    cy = int(np.floor(location / self.x_length))
+                    cx = int(location % self.x_length)
+                    found_dict[(location, indicator)] = not_found_dict[(location, indicator)]
+                    not_found_dict.pop((location, indicator))
+                    if not not_found_dict:
+                        break
+
+                perfect_heuristic[idx] = found_dict
             else:
                 print("Do not define such cost")
                 exit()
         return perfect_heuristic
 
-    def get_g_val(self, prev_g_val, loc, new_loc, node_constraints):
+    def get_g_val(self, prev_g_val, loc, new_loc, indicator):
 
         out_cost = list(prev_g_val)
-        # indicator = None
+        new_indicator = None
 
         # Calculate cost for single step
         for idx in range(self.num_objective):
@@ -235,23 +267,20 @@ class Map:
                 if new_loc != loc:
                     out_cost[idx] += 1
             elif self.cost_list[idx] == 'turning':
-                # if new_loc != ll_node.loc:
-                #     if s.indicator == None or s.indicator == new_loc - ll_node.loc:
-                #         pass
-                #     elif s.indicator == -(new_loc - ll_node.loc):
-                #         out_cost[idx] += 2
-                #     else:
-                #         out_cost[idx] += 1
-                #     indicator = new_loc - ll_node.loc
-                # else:
-                #     indicator = s.indicator
-                pass
+                if new_loc != loc:
+                    new_indicator = new_loc - loc
+                    if new_indicator == indicator or indicator == None:
+                        pass
+                    elif new_indicator == -indicator:
+                        out_cost[idx] += 2
+                    else:
+                        out_cost[idx] += 1
+                else:
+                    new_indicator = indicator
             else:
                 print("Do not define such cost")
                 exit()
-
-        return tuple(out_cost)
-
+        return tuple(out_cost), new_indicator
 
 
 def comax(v1, v2):
@@ -293,7 +322,6 @@ def ndcomax_path(v1, V2):
         tr_vecs = update_list_it(tr_vecs, tr(new_vec[0]))
 
     return res
-
 
 
 def gen_splitting(lb, ub, paths):

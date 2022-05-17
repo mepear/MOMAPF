@@ -5,7 +5,7 @@ import numpy as np
 import time
 
 class LLNode:
-    def __init__(self, loc, timestep, g_val, h_val, parent=None):
+    def __init__(self, loc, timestep, g_val, h_val, parent=None, indicator=None):
         self.loc = loc
         self.timestep = timestep
         self.g_val = g_val
@@ -13,6 +13,7 @@ class LLNode:
         self.f_val = tuple(g + h for g,h in zip(g_val, h_val))
         self.state = (loc, timestep)
         self.parent = parent
+        self.indicator = indicator
 
     def __repr__(self):
         return f"ll node - loc: {self.loc} - t: {self.timestep} - g: {self.g_val} - h: {self.h_val}"
@@ -52,9 +53,14 @@ class LLSolver:
         self.goal = goal
         self.heuristic = G.compute_heuristic(goal)
 
-    def get_heuristic(self, loc):
-        
-        return tuple(self.heuristic[i][loc] for i in range(self.num_objective))
+    def get_heuristic(self, loc, indicator):
+        heuristic_list = []
+        for idx in range(self.num_objective):
+            if self.cost_list[idx] == 'turning':
+                heuristic_list.append(self.heuristic[idx][(loc, indicator)])
+            else:
+                heuristic_list.append(self.heuristic[idx][loc])
+        return tuple(heuristic_list)
 
     def is_goal(self, ll_node, node_constraints):
         """
@@ -69,25 +75,28 @@ class LLSolver:
         
         return False
 
-    def get_children(self, node, node_constraints, upper_bound):
+    def get_children(self, node, upper_bound, max_timestep):
         children = []
 
         # generate children node here
-        current_y = int(np.floor(node.loc / self.x_length))
-        current_x = int(node.loc % self.x_length)
+        current_loc = node.loc
+        current_y = int(np.floor(current_loc / self.x_length))
+        current_x = int(current_loc % self.x_length)
         action_x = [-1, 0, 1, 0, 0]
         action_y = [0, -1, 0, 1, 0]
         for ax, ay in zip(action_x, action_y):
             next_x = current_x + ax
             next_y = current_y + ay
             next_loc = next_y * self.x_length + next_x
+            if (ax == 0) and (ay == 0) and (node.timestep > max_timestep):
+                continue
             if (next_x >= self.x_length) or (next_x < 0) or (next_y >= self.y_length) or (next_y < 0):
                 continue
             if (self.map[next_y, next_x] > 0):
                 continue
-            g_val = self.G.get_g_val(node.g_val, node.loc, next_loc, node_constraints)
-            heuristic = tuple(self.heuristic[i][next_loc] for i in range(self.num_objective))
-            new_node = LLNode(next_loc, node.timestep + 1, g_val, heuristic, parent=node)
+            g_val, new_indicator = self.G.get_g_val(node.g_val, current_loc, next_loc, node.indicator)
+            heuristic = self.get_heuristic(next_loc, new_indicator)
+            new_node = LLNode(next_loc, node.timestep + 1, g_val, heuristic, parent=node, indicator=new_indicator)
             if (heuristic[0] + g_val[0] < upper_bound):
                 children.append(new_node)
 
@@ -114,15 +123,19 @@ class LLSolver:
             for idx in range(len(reverse_path)):
                 path.append(reverse_path[len(reverse_path) - 1 - idx])
                 times.append(idx)
+            path.append(path[-1])
+            times.append(np.inf)
+
             path_list[i][0] = path
             path_list[i][1] = times
 
         return path_list, cost_vec_list
 
-    def find_path(self, node_constraints=[], swap_constraints=[], upper_bound=np.inf):
+    def find_path(self, node_constraints=[], swap_constraints=[], upper_bound=np.inf, max_timestep=-1):
+
         start_time = time.perf_counter()
 
-        start = LLNode(self.start, 0, tuple(0 for _ in range(self.num_objective)), self.get_heuristic(self.start), None)
+        start = LLNode(self.start, 0, tuple(0 for _ in range(self.num_objective)), self.get_heuristic(self.start, None))
         open_l = [start]
         # !! DomChecker only works for 2 and 3 objectives
         closed = dict()
@@ -149,7 +162,7 @@ class LLSolver:
             closed[curr.state].insert(tr(curr.f_val))
 
             num_expand += 1
-            children = self.get_children(curr, node_constraints, upper_bound)
+            children = self.get_children(curr, upper_bound, max_timestep)
             for ch in children:
                 if is_constrained(node_constraints, swap_constraints, ch, ch.parent):
                     continue

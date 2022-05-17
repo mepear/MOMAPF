@@ -1,16 +1,8 @@
-"""
-Author: Zhongqiang (Richard) Ren
-Version@2021
-Remark: some of the code is redundant and needs a clean up.
-"""
 import numpy as np
 import copy
 import time
-import sys
 
 import common as cm
-import moastar
-import mostastar as mosta
 import itertools as itt
 from copy import deepcopy
 from ll_solver import LLSolver
@@ -21,7 +13,7 @@ OPEN_ADD_MODE = 2
 ######
 
 def ReturnCost(element):
-  return element[1]
+  return element[2]
 
 class MocbsConstraint:
   """
@@ -146,9 +138,9 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, cvecs, time_limit, use_cost_bound=False):
+  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False):
     """
-    arg grids is a 2d static grid.
+    G contains all information about the raw graph.
     """
     ## Instance Related args
     self.grids = G.map
@@ -159,7 +151,6 @@ class MocbsSearch:
     self.gy_list = deepcopy(gy_list)
     self.num_robots = len(sx_list)
     self.cdim = G.num_objective
-    self.cvecs = copy.deepcopy(cvecs) # for multi-dimensional cost.
     self.cgrids = G.cost_grids # for multi-dimensional cost.
     self.time_limit = time_limit
     self.clist = G.cost_list
@@ -168,7 +159,6 @@ class MocbsSearch:
     # Search Related args
     self.nodes = dict() # high level nodes
     self.open_list = cm.PrioritySet()
-    self.open_by_tree = dict()
     self.closed_set = set()
     self.num_closed_low_level_states = 0
     self.num_low_level_calls = 0
@@ -205,14 +195,6 @@ class MocbsSearch:
                     int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
                     float(self.total_low_level_time), int(self.num_low_level_calls))
       return False, dict(), output_res, None, None, None, None, None
-
-    best_g_value = -1
-    reached_goal_id = -1
-
-    # the following few lines is useful when self.expansion_mode == 1, init self.curr_root
-    for k in self.open_by_tree:
-      self.curr_root = k
-      break
 
     ########################################################
     #### init search, END ####
@@ -300,23 +282,20 @@ class MocbsSearch:
     """
     self.pareto_idvl_path_dict = dict()
     for ri in range(self.num_robots):
-      tnow = time.perf_counter()
-      time_left = self.time_limit - (tnow - self.tstart)
 
       single_pareto_path, _ = self.ll_starter_list[ri].find_path()
       self.pareto_idvl_path_dict[ri] = list()
-      for path, _, gval in single_pareto_path:
-        new_dict = [path, gval[0], 0, gval]
+      for path, timestep, gval in single_pareto_path:
+        new_dict = [path, timestep, gval[0], 0, gval]
         self.pareto_idvl_path_dict[ri].append(new_dict)
 
       if self.use_cost_bound:
-        # self.ComputePathCost(self.pareto_idvl_path_dict[ri], ri)
         self.pareto_idvl_path_dict[ri].sort(key=ReturnCost)
         for ind in range(len(self.pareto_idvl_path_dict[ri])):
           if ind == (len(self.pareto_idvl_path_dict[ri]) - 1):
-            self.pareto_idvl_path_dict[ri][ind][2] = np.inf
+            self.pareto_idvl_path_dict[ri][ind][3] = np.inf
           else:
-            self.pareto_idvl_path_dict[ri][ind][2] = self.pareto_idvl_path_dict[ri][ind + 1][2]
+            self.pareto_idvl_path_dict[ri][ind][3] = self.pareto_idvl_path_dict[ri][ind + 1][2]
 
       tnow = time.perf_counter()
       if (tnow - self.tstart > self.time_limit):
@@ -328,8 +307,8 @@ class MocbsSearch:
     init_size = 1
     for k in self.pareto_idvl_path_dict:
       init_size = init_size * len(self.pareto_idvl_path_dict[k])
-
     print("Initialization size:", init_size)
+
     if (init_size > MOCBS_INIT_SIZE_LIMIT):
       print("[CAVEAT] Too many roots to be generated for MO-CBS. Terminate. (why not use MO-CBS-t?)")
       self.num_roots = init_size
@@ -344,17 +323,16 @@ class MocbsSearch:
       self.nodes[nid].root = nid
       self.node_id_gen = self.node_id_gen + 1
       for ri in range(len(jpath)):
-        self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][3]]
-        self.nodes[nid].true_lower_bound[ri] = jpath[ri][1]
-        self.nodes[nid].upper_bound[ri] = jpath[ri][2]
+        self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][1], jpath[ri][4]]
+        if self.use_cost_bound:
+          self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
+          self.nodes[nid].upper_bound[ri] = jpath[ri][3]
       cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
 
       if OPEN_ADD_MODE == 1:
         self.open_list.add(np.sum(cvec), nid)
-        self.open_by_tree[nid].add(np.sum(cvec), nid)
       elif OPEN_ADD_MODE == 2:
         self.open_list.add(tuple(cvec), nid)
-        self.open_by_tree[nid].add(tuple(cvec), nid)
 
     print("Finish Initialization")
     return 1
@@ -365,7 +343,7 @@ class MocbsSearch:
     """
     out_cost = np.zeros(self.cdim) # init M-dim cost vector
     for idx in nd.sol.paths:
-      out_cost += np.array(nd.sol.paths[idx][1])
+      out_cost += np.array(nd.sol.paths[idx][2])
     nd.cvec = out_cost # update cost in that node
     return out_cost
 
@@ -385,30 +363,27 @@ class MocbsSearch:
           node_cs.append( (cstr.vb, cstr.tb) )
         elif self.nodes[cid].cstr.flag == 2: # edge constraint
           swap_cs.append( (cstr.va, cstr.vb, cstr.ta) )
-          # node_cs.append( (cstr.va, cstr.tb) ) # since another robot is coming to v=va at t=tb
       cid = self.nodes[cid].parent
     return node_cs, swap_cs
 
   def PreProcess(self, node_cs, swap_cs):
     swap_dict = dict()
+    max_timestep = -1
     for constraint in swap_cs:
       if constraint[0] not in swap_dict:
         swap_dict[constraint[0]] = dict()
       if constraint[2] not in swap_dict[constraint[0]]:
         swap_dict[constraint[0]][constraint[2]] = set()
       swap_dict[constraint[0]][constraint[2]].add(constraint[1])
+      max_timestep = max(constraint[2], max_timestep)
 
     node_dict = dict()
     for constraint in node_cs:
       if constraint[0] not in node_dict:
         node_dict[constraint[0]] = set()
       node_dict[constraint[0]].add(constraint[1])
-    return node_dict, swap_dict
-
-  def LsearchPlanner(self, ri, node_cs, swap_cs, cost_upper_bound=np.inf):
-    path_dict, lsearch_stats = mosta.RunMoSTAstar(self.grids, self.sx_list[ri], self.sy_list[ri], self.gx_list[ri], self.gy_list[ri], \
-      self.cvecs[ri], self.cgrids, self.cdim, 1.0, 0.0, np.inf, self.time_limit-(time.perf_counter()-self.tstart), self.clist, False, node_cs, swap_cs, cost_upper_bound)
-    return path_dict, lsearch_stats
+      max_timestep = max(constraint[1], max_timestep)
+    return node_dict, swap_dict, max_timestep
 
   def Lsearch(self, nid):
     """
@@ -420,25 +395,24 @@ class MocbsSearch:
     true_lower_bound = nd.true_lower_bound[ri]
     upper_bound = nd.upper_bound[ri]
 
-    # call constrained NAMOA*
-
-    node_dict, swap_dict = self.PreProcess(node_cs, swap_cs)
-    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(node_dict, swap_dict, upper_bound)
+    # call MOA* and use upper bound to do pruning
+    node_dict, swap_dict, max_timestep = self.PreProcess(node_cs, swap_cs)
+    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(node_dict, swap_dict, upper_bound, max_timestep)
     ct = 0 # count of node generated
 
-    # The added part and find cost of each path
-    if self.use_cost_bound:
-      new_path_list = []
-      for k in range(len(path_list)):
-        path, _, gval = path_list[k]
-        new_path_list.append([path, gval[0], gval])
-      new_path_list.sort(key=ReturnCost)
+    new_path_list = []
+    for path, timestep, gval in path_list:
+      new_path_list.append([path, timestep, gval[0], gval])
+    path_list = new_path_list
 
-      path_list = new_path_list
-      cost_list = []
-      for i in new_path_list:
-        cost_list.append(i[2])
-      print(cost_list, true_lower_bound, upper_bound)
+    # The added part and get sorted path list
+    if self.use_cost_bound:
+      path_list.sort(key=ReturnCost)
+
+    cost_list = []
+    for i in new_path_list:
+      cost_list.append(i[2])
+    print(cost_list, true_lower_bound, upper_bound)
 
     for k in range(len(path_list)): # loop over all individual Pareto paths
       if self.use_cost_bound:
@@ -447,17 +421,17 @@ class MocbsSearch:
         elif (k == len(path_list) - 1):
           new_nd = copy.deepcopy(self.nodes[nid])
           new_nd.upper_bound[ri] = upper_bound
-          new_nd.true_lower_bound[ri] = max([true_lower_bound, path_list[k][1]])
+          new_nd.true_lower_bound[ri] = max([true_lower_bound, path_list[k][2]])
           # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
         elif path_list[k][2] > true_lower_bound:
           new_nd = copy.deepcopy(self.nodes[nid])
-          new_nd.true_lower_bound[ri] = path_list[k][1]
-          new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][1]])
+          new_nd.true_lower_bound[ri] = path_list[k][2]
+          new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
           # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
         elif path_list[k][2] <= true_lower_bound:
           if path_list[k+1][2] > true_lower_bound:
             new_nd = copy.deepcopy(self.nodes[nid])
-            new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][1]])
+            new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
             new_nd.true_lower_bound[ri] = true_lower_bound
             # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
           else:
@@ -466,8 +440,7 @@ class MocbsSearch:
         new_nd = copy.deepcopy(self.nodes[nid])
 
       new_nd.sol.DelPath(ri)
-
-      new_nd.sol.paths[ri] = [path_list[k][0], path_list[k][2]]
+      new_nd.sol.paths[ri] = [path_list[k][0],path_list[k][1], path_list[k][3]]
       new_nd.cvec = self.ComputeNodeCostObject(new_nd)
 
       if self.GoalFilterNodeObject(new_nd):
@@ -484,10 +457,8 @@ class MocbsSearch:
       ### ADD OPEN BEGIN
       if OPEN_ADD_MODE == 1:
         self.open_list.add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN
-        self.open_by_tree[new_nd.root].add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
       elif OPEN_ADD_MODE == 2:
         self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
-        self.open_by_tree[new_nd.root].add(tuple(new_nd.cvec), new_nd.id) # add to OPEN in the search tree it belongs to
       ### ADD OPEN END
 
       ct = ct + 1 # count increase
@@ -566,7 +537,7 @@ class MocbsSearch:
     Pop a node from OPEN. 
     """
   
-    if self.expansion_mode == 0 and self.open_list.size() == 0:
+    if self.open_list.size() == 0:
       return False, []
   
     popped = self.open_list.pop() # pop_node = (f-value, high-level-node-id)
@@ -574,18 +545,8 @@ class MocbsSearch:
     print(popped)
     return True, popped
 
+def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit, use_cost_bound=False):
 
-def RunMocbsMAPF(G, sx, sy, gx, gy, cvecs, cdim, search_limit, time_limit, use_cost_bound=False):
-  print("... Run MO-CBS ... ")
-
-  truncated_cvecs = list()
-  truncated_cgrids = list()
-
-  for idx in range(len(cvecs)):
-    truncated_cvecs.append(cvecs[idx][0:cdim])
-  for idx in range(cdim):
-    truncated_cgrids.append(G.cost_grids[idx])
-
-  mocbs = MocbsSearch(G, sx, sy, gx, gy, truncated_cvecs, expansion_mode, time_limit, use_cost_bound=use_cost_bound)
+  mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit, use_cost_bound=use_cost_bound)
 
   return mocbs.Search(search_limit)
