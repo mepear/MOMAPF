@@ -106,7 +106,7 @@ class MocbsSol:
         jta = self.paths[j][1][jx]
         itb = self.paths[i][1][ix+1]
         ita = self.paths[i][1][ix]
-        iva = self.paths[i][0][ix] 
+        iva = self.paths[i][0][ix]
         ivb = self.paths[i][0][ix+1]
         jva = self.paths[j][0][jx]
         jvb = self.paths[j][0][jx+1]
@@ -387,8 +387,9 @@ class MocbsSearch:
       self.node_id_gen = self.node_id_gen + 1
       for ri in range(len(jpath)):
         self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][1], jpath[ri][4]]
-        self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
-        self.nodes[nid].upper_bound[ri] = jpath[ri][3]
+        if self.use_cost_bound:
+          self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
+          self.nodes[nid].upper_bound[ri] = jpath[ri][3]
       cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
 
       self.open_by_tree[nid] = cm.PrioritySet()
@@ -471,18 +472,20 @@ class MocbsSearch:
     ct = 0 # count of node generated
 
     # The added part and find cost of each path
+    new_path_list = []
+    for k in range(len(path_list)):
+      nlv, nlt = EnforceUnitTimePath(path_list[k][0], path_list[k][1])
+      new_path_list.append([nlv, nlt, path_list[k][2][0], path_list[k][2]])
+
     if self.use_cost_bound:
-      new_path_list = []
-      for k in range(len(path_list)):
-        nlv, nlt = EnforceUnitTimePath(path_list[k][0], path_list[k][1])
-        new_path_list.append([nlv, nlt, path_list[k][2][0], path_list[k][2]])
       new_path_list.sort(key=ReturnCost)
 
-      path_list = new_path_list
-      cost_list = []
-      for i in new_path_list:
-        cost_list.append(i[2])
-      print(cost_list, true_lower_bound, upper_bound)
+
+    path_list = new_path_list
+    cost_list = []
+    for i in new_path_list:
+      cost_list.append(i[2])
+    print(cost_list, true_lower_bound, upper_bound)
 
     for k in range(len(path_list)): # loop over all individual Pareto paths
       if self.use_cost_bound:
@@ -510,7 +513,6 @@ class MocbsSearch:
         new_nd = copy.deepcopy(self.nodes[nid])
 
       new_nd.sol.DelPath(ri)
-
       new_nd.sol.paths[ri] = [path_list[k][0], path_list[k][1], path_list[k][3]]
       new_nd.cvec = self.ComputeNodeCostObject(new_nd)
 

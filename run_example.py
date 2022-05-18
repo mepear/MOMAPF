@@ -1,5 +1,3 @@
-import context
-import time
 from multiprocessing import Pool
 import re
 import sys
@@ -8,8 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import common 
 import mocbs
+import mocbs_new
 import arguments
 from utils import Map
 import moastar # NAMOA*
@@ -24,7 +22,7 @@ def Run(args, index=None, use_bound=None):
     index = args['index']
 
   f1 = open(file='./benchmark/{}/{}-random-{}.scen'.format(args['experiment_name'], args['experiment_name'], index), mode='rb')
-  f2 = open(file='./benchmark/{}/{}.map'.format(args['experiment_name'], args['experiment_name']))
+  f2 = open(file='./benchmark/{}/{}.map'.format(args['experiment_name'], args['experiment_name']), mode='rb')
   cost_grids = np.load(file='./benchmark/{}/{}-matrix.npy'.format(args['experiment_name'], args['experiment_name']))
 
   if use_bound == None:
@@ -37,22 +35,38 @@ def Run(args, index=None, use_bound=None):
 
   agent_num = args['robot_num']
   _ = f1.readline()
-  datapat = re.compile(b'(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\n')
+  _ = f2.readline()
+  datapat_1 = re.compile(b'height\s(.*)\n')
+  datapat_2 = re.compile(b'(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\t(.*)\n')
 
   sx_list = []
   sy_list = []
   gx_list = []
   gy_list = []
 
-  for i in range(agent_num):
+  data = f2.readline()
+  match = datapat_1.match(data)
+  height = int(match.group(1))
+  data = f2.readline()
+  datapat_1 = re.compile(b'width\s(.*)\n')
+  match = datapat_1.match(data)
+  width = int(match.group(1))
+  grids = np.ones((height, width), dtype=np.int)
+  _ = f2.readline()
+
+  for _ in range(agent_num):
     data = f1.readline()
-    match = datapat.match(data)
+    match = datapat_2.match(data)
     sx_list.append(int(match.group(5)))
     sy_list.append(int(match.group(6)))
     gx_list.append(int(match.group(7)))
     gy_list.append(int(match.group(8)))
 
-  grids = np.zeros((16, 16), dtype=np.int)
+  for i in range(height):
+    data = f2.readline()
+    for j in range(width):
+      if data[j] == 46 or data[j] == 71: # This represent '.' and 'G'
+        grids[i][j] = 0
 
   sx = np.array(sx_list)  # start x = column in grid image
   sy = np.array(sy_list)  # start y = rows in grid image, the kth component corresponds to the kth robot.
@@ -60,9 +74,7 @@ def Run(args, index=None, use_bound=None):
   gy = np.array(gy_list)  # goal y
 
   cgrids = [cost_grids[0], cost_grids[1]]
-  cvecs = np.ones((agent_num, 2))
   clist = args['cost_name']
-  cdim = len(clist)
 
   G = Map(grids, cgrids, clist)
 
@@ -71,8 +83,8 @@ def Run(args, index=None, use_bound=None):
   ##################################################################
 
   ### Invoke MO-CBS planner ###
-  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs.RunMocbsMAPF(G,
-                              sx, sy, gx, gy, cvecs, cdim, np.inf, 1500, expansion_mode=0, use_cost_bound=use_cost_bound)
+  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs_new.RunMocbsMAPF(G,
+                               sx, sy, gx, gy, np.inf, 1500, use_cost_bound=use_cost_bound)
 
   #### Invoke NAMOA* planner ###
   # res = moastar.RunMoAstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 100)
@@ -80,7 +92,7 @@ def Run(args, index=None, use_bound=None):
   #### Invoke MOM* planner ###
   # res = momstar.RunMoMstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 10)
 
-  # print(success)
+  print(success)
   print("Paretal Optimal Paths Number:", len(res_cost))
   print(res_cost)
   # print(open_list_res)
