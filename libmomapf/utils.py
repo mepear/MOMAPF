@@ -240,8 +240,13 @@ class Map:
                     not_found_dict.pop((location, indicator))
                     if not not_found_dict:
                         break
-
-                perfect_heuristic[idx] = found_dict
+                return_dict = dict()
+                for key in found_dict.keys():
+                    if key[0] not in return_dict:
+                        return_dict[key[0]] = found_dict[key]
+                    else:
+                        return_dict[key[0]] = min(return_dict[key[0]], found_dict[key])
+                perfect_heuristic[idx] = return_dict
             else:
                 print("Do not define such cost")
                 exit()

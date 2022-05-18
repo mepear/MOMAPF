@@ -53,14 +53,9 @@ class LLSolver:
         self.goal = goal
         self.heuristic = G.compute_heuristic(goal)
 
-    def get_heuristic(self, loc, indicator):
-        heuristic_list = []
-        for idx in range(self.num_objective):
-            if self.cost_list[idx] == 'turning':
-                heuristic_list.append(self.heuristic[idx][(loc, indicator)])
-            else:
-                heuristic_list.append(self.heuristic[idx][loc])
-        return tuple(heuristic_list)
+    def get_heuristic(self, loc):
+
+        return tuple(self.heuristic[i][loc] for i in range(self.num_objective))
 
     def is_goal(self, ll_node, node_constraints):
         """
@@ -95,7 +90,7 @@ class LLSolver:
             if (self.map[next_y, next_x] > 0):
                 continue
             g_val, new_indicator = self.G.get_g_val(node.g_val, current_loc, next_loc, node.indicator)
-            heuristic = self.get_heuristic(next_loc, new_indicator)
+            heuristic = self.get_heuristic(next_loc)
             new_node = LLNode(next_loc, node.timestep + 1, g_val, heuristic, parent=node, indicator=new_indicator)
             if (heuristic[0] + g_val[0] < upper_bound):
                 children.append(new_node)
@@ -135,7 +130,7 @@ class LLSolver:
 
         start_time = time.perf_counter()
 
-        start = LLNode(self.start, 0, tuple(0 for _ in range(self.num_objective)), self.get_heuristic(self.start, None))
+        start = LLNode(self.start, 0, tuple(0 for _ in range(self.num_objective)), self.get_heuristic(self.start))
         open_l = [start]
         # !! DomChecker only works for 2 and 3 objectives
         closed = dict()
