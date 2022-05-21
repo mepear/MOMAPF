@@ -6,14 +6,12 @@ import common as cm
 import itertools as itt
 from copy import deepcopy
 from ll_solver import LLSolver
+from utils import CostBound, gen_splitting
 
 ######
 MOCBS_INIT_SIZE_LIMIT = 800*1000
 OPEN_ADD_MODE = 2
 ######
-
-def ReturnCost(element):
-  return element[2]
 
 class MocbsConstraint:
   """
@@ -85,7 +83,7 @@ class MocbsNode:
   """
   High level search tree node
   """
-  def __init__(self, id0, cvec, num_robots, true_low_bound=None, upper_bound=None, sol=MocbsSol(), cstr=MocbsConstraint(-1,-1,-1,-1,-1,-1), parent=-1):
+  def __init__(self, id0, cvec, num_robots, sol=MocbsSol(), cstr=MocbsConstraint(-1,-1,-1,-1,-1,-1), parent=-1):
     """
     id = id of this high level CT node
     sol = an object of type CCbsSol.
@@ -98,18 +96,10 @@ class MocbsNode:
     self.sol = sol
     self.cstr = cstr
     self.cvec = cvec
-    self.parent = -1 
+    self.cost_bound_list = [CostBound(tuple(0 for _ in range(len(cvec))), [tuple(np.inf for _ in range(len(cvec)))]) for _ in range(num_robots)]
+    self.parent = -1
     self.root = -1 # to which tree it belongs
 
-    ## This is the added upper bound and lower bound
-    if (true_low_bound != None):
-      self.true_lower_bound = true_low_bound
-    else:
-      self.true_lower_bound = np.zeros(num_robots)
-    if (upper_bound != None):
-      self.upper_bound = upper_bound
-    else:
-      self.upper_bound = np.ones(num_robots) * np.inf
     return
 
   def __str__(self):
@@ -162,6 +152,7 @@ class MocbsSearch:
     self.closed_set = set()
     self.num_closed_low_level_states = 0
     self.num_low_level_calls = 0
+    self.generated_node = 0
     self.total_low_level_time = 0
     self.node_id_gen = 1
     self.num_roots = 0
@@ -189,12 +180,7 @@ class MocbsSearch:
     first_sol_gvec = []
 
     if init_success == 0:
-      search_complete = False
-      output_res = (int(len(self.closed_set)), dict(), 0, \
-                    float(time.perf_counter() - self.tstart), 0, int(self.num_roots), \
-                    int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
-                    float(self.total_low_level_time), int(self.num_low_level_calls))
-      return False, dict(), output_res, None, None, None, None, None
+      return False, None, None, None
 
     ########################################################
     #### init search, END ####
@@ -259,20 +245,18 @@ class MocbsSearch:
       hnode = self.nodes[nid]
       all_path_set[hnode.id] = hnode.sol.paths
       all_cost_vec[hnode.id] = hnode.cvec
-    if (self.open_list.size() == 0) and (len(self.nondom_goal_nodes) > 0) and (self.root_generated == self.num_roots):
-      search_success = True
 
-    # output_res = (int(len(self.closed_set)), all_cost_vec, int(search_success), \
-    #               float(time.perf_counter() - self.tstart), int(self.num_closed_low_level_states), \
-    #               int(self.num_roots), int(self.open_list.size()), find_first_feasible_sol, first_sol_gvec,
-    #               float(self.total_low_level_time), int(self.num_low_level_calls))
     time_res = round(time.perf_counter() - self.tstart)
     open_list_res = self.open_list.size()
     close_list_res = len(self.closed_set)
     low_level_time = round(self.total_low_level_time)
     low_level_calls = self.num_low_level_calls
+    branch_factor = float(self.generated_node) / float(self.num_low_level_calls)
 
-    return search_complete, all_path_set, all_cost_vec, time_res, open_list_res, close_list_res, low_level_time, low_level_calls
+    result_dict = {'time': time_res, 'closed_num': close_list_res, 'low_level_time': low_level_time,
+                   'low_level_calls': low_level_calls, 'branch_factor': branch_factor}
+
+    return search_complete, all_path_set, all_cost_vec, result_dict
 
   def InitSearch(self):
     """
@@ -283,19 +267,13 @@ class MocbsSearch:
     self.pareto_idvl_path_dict = dict()
     for ri in range(self.num_robots):
 
-      single_pareto_path, _ = self.ll_starter_list[ri].find_path()
-      self.pareto_idvl_path_dict[ri] = list()
-      for path, timestep, gval in single_pareto_path:
-        new_dict = [path, timestep, gval[0], 0, gval]
-        self.pareto_idvl_path_dict[ri].append(new_dict)
+      single_pareto_path, _ = self.ll_starter_list[ri].find_path([tuple(np.inf for _ in range(self.cdim))])
+      self.pareto_idvl_path_dict[ri] = single_pareto_path
 
       if self.use_cost_bound:
-        self.pareto_idvl_path_dict[ri].sort(key=ReturnCost)
-        for ind in range(len(self.pareto_idvl_path_dict[ri])):
-          if ind == (len(self.pareto_idvl_path_dict[ri]) - 1):
-            self.pareto_idvl_path_dict[ri][ind][3] = np.inf
-          else:
-            self.pareto_idvl_path_dict[ri][ind][3] = self.pareto_idvl_path_dict[ri][ind + 1][2]
+        trivial_lb = tuple(0 for _ in range(self.cdim))
+        trivial_ub = [tuple(np.inf for _ in range(self.cdim))]
+        self.pareto_idvl_path_dict[ri] = gen_splitting(trivial_lb, trivial_ub, single_pareto_path)
 
       tnow = time.perf_counter()
       if (tnow - self.tstart > self.time_limit):
@@ -319,14 +297,13 @@ class MocbsSearch:
 
     for jpath in all_combi:
       nid = self.node_id_gen
-      self.nodes[nid] = copy.deepcopy(MocbsNode(nid, np.zeros(self.cdim), self.num_robots))
+      self.nodes[nid] = copy.deepcopy(MocbsNode(nid, tuple(0 for _ in range(self.cdim)), self.num_robots))
       self.nodes[nid].root = nid
       self.node_id_gen = self.node_id_gen + 1
-      for ri in range(len(jpath)):
-        self.nodes[nid].sol.paths[ri] = [jpath[ri][0], jpath[ri][1], jpath[ri][4]]
+      for ri in range(self.num_robots):
+        self.nodes[nid].sol.paths[ri] = [jpath[ri][1][0], jpath[ri][1][1], jpath[ri][0]]
         if self.use_cost_bound:
-          self.nodes[nid].true_lower_bound[ri] = jpath[ri][2]
-          self.nodes[nid].upper_bound[ri] = jpath[ri][3]
+          self.nodes[nid].cost_bound_list[ri] = CostBound(jpath[ri][2], jpath[ri][3])
       cvec = self.ComputeNodeCostObject(self.nodes[nid])  # update node cost vec and return cost vec
 
       if OPEN_ADD_MODE == 1:
@@ -392,56 +369,29 @@ class MocbsSearch:
     nd = self.nodes[nid]
     ri = nd.cstr.i
     node_cs, swap_cs = self.BacktrackCstrs(nid)
-    true_lower_bound = nd.true_lower_bound[ri]
-    upper_bound = nd.upper_bound[ri]
+    lower_bound = nd.cost_bound_list[ri].lb
+    upper_bound = nd.cost_bound_list[ri].ub
 
     # call MOA* and use upper bound to do pruning
     node_dict, swap_dict, max_timestep = self.PreProcess(node_cs, swap_cs)
-    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(node_dict, swap_dict, upper_bound, max_timestep)
+    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict, swap_dict, max_timestep)
     ct = 0 # count of node generated
 
-    new_path_list = []
-    for path, timestep, gval in path_list:
-      new_path_list.append([path, timestep, gval[0], gval])
-    path_list = new_path_list
-
-    # The added part and get sorted path list
     if self.use_cost_bound:
-      path_list.sort(key=ReturnCost)
+      path_list = gen_splitting(lower_bound, upper_bound, path_list)
 
     cost_list = []
-    for i in new_path_list:
-      cost_list.append(i[2])
-    print(cost_list, true_lower_bound, upper_bound)
+    for i in path_list:
+      cost_list.append(i[0])
+    print(cost_list, lower_bound, upper_bound)
 
-    for k in range(len(path_list)): # loop over all individual Pareto paths
-      if self.use_cost_bound:
-        if (path_list[k][2] >= upper_bound):
-          break
-        elif (k == len(path_list) - 1):
-          new_nd = copy.deepcopy(self.nodes[nid])
-          new_nd.upper_bound[ri] = upper_bound
-          new_nd.true_lower_bound[ri] = max([true_lower_bound, path_list[k][2]])
-          # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
-        elif path_list[k][2] > true_lower_bound:
-          new_nd = copy.deepcopy(self.nodes[nid])
-          new_nd.true_lower_bound[ri] = path_list[k][2]
-          new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
-          # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
-        elif path_list[k][2] <= true_lower_bound:
-          if path_list[k+1][2] > true_lower_bound:
-            new_nd = copy.deepcopy(self.nodes[nid])
-            new_nd.upper_bound[ri] = min([upper_bound, path_list[k+1][2]])
-            new_nd.true_lower_bound[ri] = true_lower_bound
-            # print((new_nd.upper_bound[ri], new_nd.true_lower_bound[ri]))
-          else:
-            continue
-      else:
-        new_nd = copy.deepcopy(self.nodes[nid])
-
+    for path_item in path_list: # loop over all individual Pareto paths
+      new_nd = copy.deepcopy(self.nodes[nid])
       new_nd.sol.DelPath(ri)
-      new_nd.sol.paths[ri] = [path_list[k][0],path_list[k][1], path_list[k][3]]
+      new_nd.sol.paths[ri] = [path_item[1][0], path_item[1][1], path_item[0]]
       new_nd.cvec = self.ComputeNodeCostObject(new_nd)
+      if self.use_cost_bound:
+        new_nd.cost_bound_list[ri] = CostBound(path_item[2], path_item[3])
 
       if self.GoalFilterNodeObject(new_nd):
         continue # skip this dominated node
@@ -462,6 +412,8 @@ class MocbsSearch:
       ### ADD OPEN END
 
       ct = ct + 1 # count increase
+
+    lsearch_stats.append(ct)
     return lsearch_stats
 
   def GoalFilterNode(self,nid):
@@ -493,23 +445,11 @@ class MocbsSearch:
     self.nondom_goal_nodes = temp_set
     return
 
-  def PathDictLexSort(self, path_dict, cvec_dict):
-    """
-    sort path_dict by lex order and return a list.
-    """
-    out_path_list = list()
-    pq = cm.PrioritySet()
-    for k in cvec_dict:
-      pq.add( tuple( cvec_dict[k] ), k)
-    while pq.size() > 0:
-      cvec, k = pq.pop()
-      out_path_list.append(path_dict[k])
-    return out_path_list
-
   def UpdateStats(self, stats):
     self.num_closed_low_level_states = self.num_closed_low_level_states + stats[0]
     self.total_low_level_time = self.total_low_level_time + stats[3]
     self.num_low_level_calls = self.num_low_level_calls + 1
+    self.generated_node = self.generated_node + stats[4]
     return
 
   def ReconstructPath(self, nid):

@@ -21,6 +21,12 @@ def update_list_it(vec_list, vec):
     return vec_list
 
 
+class CostBound:
+    def __init__(self, lb, ub):
+        self.lb = lb
+        self.ub = ub
+
+
 class DomChecker:
     """
     testing:
@@ -118,6 +124,7 @@ for i in ins:
             i = (lb + ub) // 2
 
         return False
+
 
 class Map:
     """
@@ -302,7 +309,7 @@ def ndcomax(v1, V2):
     tr_vecs = []
 
     for new_vec in sorted(comax(v1, v2) for v2 in V2):
-#         new_vec = vec_max(v1, v2)
+        # new_vec = vec_max(v1, v2)
         if is_weakly_dominated_it(tr(new_vec), tr_vecs):
             continue
         res.append(new_vec)
@@ -315,12 +322,11 @@ def ndcomax_path(v1, V2):
     # V2 is sorted lexicographically
     # V2 = [(cost1, path1), (cos2, path2) .... ]
 
-
     res = []
     tr_vecs = []
 
-    for new_vec in sorted((comax(v1, v2), path) for v2, path in V2):
-#         new_vec = vec_max(v1, v2)
+    for new_vec in sorted((comax(v1, v2), v2, path) for (v2, path) in V2):
+        # new_vec = vec_max(v1, v2)
         if is_weakly_dominated_it(tr(new_vec[0]), tr_vecs):
             continue
         res.append(new_vec)
@@ -331,12 +337,21 @@ def ndcomax_path(v1, V2):
 
 def gen_splitting(lb, ub, paths):
     prev = []
+    result = []
 
-    for cost, path in ndcomax_path(lb, paths):
-        new_lb = cost
-        new_ub = [comax(u, cost) for u in ub]
+    for lower_bound, cost, path in ndcomax_path(lb, paths):
+        new_lb = lower_bound
+        new_ub = [comax(u, lower_bound) for u in ub]
         for p in prev:
-            new_ub = update_list_it(new_ub, comax(p, cost))
+            new_ub = update_list_it(new_ub, comax(p, lower_bound))
 
-        print(f"{path} - {new_lb} - {new_ub}")
-        prev.append(cost)
+        flag = True
+        for item in new_ub:
+            if item == new_lb:
+                flag = False
+        if flag:
+            prev.append(new_lb)
+            result.append((cost, path, new_lb, new_ub))
+            print(f"{path} - {cost} - {new_lb} - {new_ub}")
+
+    return result

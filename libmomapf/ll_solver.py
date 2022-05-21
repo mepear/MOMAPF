@@ -1,5 +1,5 @@
 from heapq import heappush, heappop
-from utils import DomChecker, tr
+from utils import DomChecker, tr, is_weakly_dominated
 from copy import deepcopy
 import numpy as np
 import time
@@ -92,7 +92,11 @@ class LLSolver:
             g_val, new_indicator = self.G.get_g_val(node.g_val, current_loc, next_loc, node.indicator)
             heuristic = self.get_heuristic(next_loc)
             new_node = LLNode(next_loc, node.timestep + 1, g_val, heuristic, parent=node, indicator=new_indicator)
-            if (heuristic[0] + g_val[0] < upper_bound):
+            flag = True
+            for cost in upper_bound:
+                if is_weakly_dominated(new_node.f_val, cost):
+                    flag = False
+            if flag:
                 children.append(new_node)
 
         return children
@@ -108,7 +112,7 @@ class LLSolver:
             current_node = deepcopy(sols[i])
             reverse_path = []  # in reverse order
             cost_vec_list.append(current_node.g_val)
-            path_list.append([None, None, current_node.g_val])
+            path_list.append([current_node.g_val, None])
             while hasattr(current_node, 'parent'):
                 reverse_path.append(current_node.loc)
                 current_node = current_node.parent
@@ -121,12 +125,14 @@ class LLSolver:
             path.append(path[-1])
             times.append(np.inf)
 
-            path_list[i][0] = path
-            path_list[i][1] = times
+            path_list[i][1] = tuple([path, times])
 
-        return path_list, cost_vec_list
+        tuple_list = [tuple(item) for item in path_list]
+        tuple_list.sort()
 
-    def find_path(self, node_constraints=[], swap_constraints=[], upper_bound=np.inf, max_timestep=-1):
+        return tuple_list, cost_vec_list
+
+    def find_path(self, upper_bound, node_constraints=[], swap_constraints=[], max_timestep=-1):
 
         start_time = time.perf_counter()
 
@@ -167,8 +173,8 @@ class LLSolver:
                     continue
                 heappush(open_l, ch)
 
-        path_list, cost_vec_list = self.reconstruct_path(sols)
+        tuple_list, cost_vec_list = self.reconstruct_path(sols)
 
         ll_info = [num_expand, cost_vec_list, True, time.perf_counter() - start_time]
 
-        return path_list, ll_info
+        return tuple_list, ll_info

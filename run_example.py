@@ -78,37 +78,27 @@ def Run(args, index=None, use_bound=None):
 
   G = Map(grids, cgrids, clist)
 
-  ##################################################################
-  #### choose one of the planner to run by uncommenting the code ###
-  ##################################################################
-
   ### Invoke MO-CBS planner ###
-  success, res_path, res_cost, time_res, open_list_res, close_list_res, low_level_time, low_level_calls=mocbs_new.RunMocbsMAPF(G,
-                               sx, sy, gx, gy, np.inf, 1500, use_cost_bound=use_cost_bound)
-
-  #### Invoke NAMOA* planner ###
-  # res = moastar.RunMoAstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 100)
-
-  #### Invoke MOM* planner ###
-  # res = momstar.RunMoMstarMAPF(grids, sx, sy, gx, gy, cvecs, cgrids, cdim, 1.0, 0.0, np.inf, 10)
+  success, res_path, res_cost, result_dict=mocbs_new.RunMocbsMAPF(G, sx, sy, gx, gy, np.inf, 1500, use_cost_bound=use_cost_bound)
 
   print(success)
   print("Paretal Optimal Paths Number:", len(res_cost))
-  print(res_cost)
+  # print(res_cost)
   # print(open_list_res)
-  print("Number of close list:", close_list_res)
-  print("Number of low level calls:", low_level_calls)
-  print("Total Low Level Time:", low_level_time)
-  print("Total Time:", time_res)
+  print("Number of close list:", result_dict['closed_num'])
+  print("Number of low level calls:", result_dict['low_level_calls'])
+  print("Total Low Level Time:", result_dict['low_level_time'])
+  print("Total Time:", result_dict['time'])
+  print("Branching Factors: ", result_dict['branch_factor'])
   # print(res_path)
 
   # df = pd.DataFrame({'success': [], "res_num": [], "close_list_num": [], "low_level_num": [], "time": []})
-  # df.to_csv("./benchmark/empty-16-16-result/plot_{}_{}.csv".format(index, int(use_cost_bound)), index=False, sep=',')
+  # df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound)), index=False, sep=',')
   #
   # data = [success, len(res_cost), close_list_res, low_level_calls, time_res]
-  # df = pd.read_csv('./benchmark/empty-16-16-result/plot_{}_{}.csv'.format(index, int(use_cost_bound)))
+  # df = pd.read_csv('./benchmark/{}-result/plot_{}_{}.csv'.format(args['experiment_name'], index, int(use_cost_bound)))
   # df.loc[1] = data
-  # df.to_csv("./benchmark/empty-16-16-result/plot_{}_{}.csv".format(index, int(use_cost_bound)), index=False, sep=',')
+  # df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound)), index=False, sep=',')
   return
 
 
