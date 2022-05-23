@@ -452,23 +452,6 @@ class MocbsSearch:
     self.generated_node = self.generated_node + stats[4]
     return
 
-  def ReconstructPath(self, nid):
-    """
-    """
-    path_set = dict()
-    for i in range(self.num_robots):
-      lx = list()
-      ly = list()
-      lv = self.nodes[nid].sol.GetPath(i)[0]
-      for v in lv:
-        y = int(np.floor(v / self.xd))
-        x = int(v % self.xd)
-        ly.append(y)
-        lx.append(x)
-      lt = self.nodes[nid].sol.GetPath(i)[1]
-      path_set[i] = [lx,ly,lt]
-    return path_set
-
   def FirstConflict(self, nd):
     return nd.CheckConflict()
 
