@@ -109,7 +109,7 @@ class LLSolver:
         cost_vec_list = []
 
         for i in range(len(sols)):
-            current_node = deepcopy(sols[i])
+            current_node = sols[i]
             reverse_path = []  # in reverse order
             cost_vec_list.append(current_node.g_val)
             path_list.append([current_node.g_val, None])

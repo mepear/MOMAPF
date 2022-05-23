@@ -167,13 +167,13 @@ class Map:
                                 found_dict[location] + self.cost_grids[idx][cy, cx],
                                 not_found_dict[location_temp])
                     # End for
+                    if not not_found_dict:
+                        break
                     location = min(not_found_dict, key=lambda x: not_found_dict[x])
                     cy = int(np.floor(location / self.x_length))
                     cx = int(location % self.x_length)
                     found_dict[location] = not_found_dict[location]
                     not_found_dict.pop(location)
-                    if not not_found_dict:
-                        break
                 perfect_heuristic[idx] = found_dict
             elif self.cost_list[idx] == 'time' or self.cost_list[idx] == 'distance':
                 found_dict = {goal: 0}
@@ -200,13 +200,13 @@ class Map:
                             not_found_dict[location_temp] = min(found_dict[location] + 1,
                                                                 not_found_dict[location_temp])
                     # End for
+                    if not not_found_dict:
+                        break
                     location = min(not_found_dict, key=lambda x: not_found_dict[x])
                     cy = int(np.floor(location / self.x_length))
                     cx = int(location % self.x_length)
                     found_dict[location] = not_found_dict[location]
                     not_found_dict.pop(location)
-                    if not not_found_dict:
-                        break
                 perfect_heuristic[idx] = found_dict
             elif self.cost_list[idx] == 'turning':
                 found_dict = {(goal, None): 0}
@@ -240,13 +240,13 @@ class Map:
                             not_found_dict[(location_temp, location_temp - location)] = min(found_dict[(location, indicator)] + 1,
                                                                             not_found_dict[(location_temp, location_temp - location)])
                     # End for
+                    if not not_found_dict:
+                        break
                     (location, indicator) = min(not_found_dict, key=lambda x: not_found_dict[x])
                     cy = int(np.floor(location / self.x_length))
                     cx = int(location % self.x_length)
                     found_dict[(location, indicator)] = not_found_dict[(location, indicator)]
                     not_found_dict.pop((location, indicator))
-                    if not not_found_dict:
-                        break
                 return_dict = dict()
                 for key in found_dict.keys():
                     if key[0] not in return_dict:
@@ -341,7 +341,9 @@ def gen_splitting(lb, ub, paths):
 
     for lower_bound, cost, path in ndcomax_path(lb, paths):
         new_lb = lower_bound
-        new_ub = [comax(u, lower_bound) for u in ub]
+        new_ub = []
+        for u in ub:
+            new_ub = update_list_it(new_ub, comax(u, lower_bound))
         for p in prev:
             new_ub = update_list_it(new_ub, comax(p, lower_bound))
 
@@ -352,6 +354,6 @@ def gen_splitting(lb, ub, paths):
         if flag:
             prev.append(new_lb)
             result.append((cost, path, new_lb, new_ub))
-            print(f"{path} - {cost} - {new_lb} - {new_ub}")
+            # print(f"{path} - {cost} - {new_lb} - {new_ub}")
 
     return result

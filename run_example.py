@@ -24,6 +24,8 @@ def Run(args, index=None, use_bound=None):
   f1 = open(file='./benchmark/{}/{}-random-{}.scen'.format(args['experiment_name'], args['experiment_name'], index), mode='rb')
   f2 = open(file='./benchmark/{}/{}.map'.format(args['experiment_name'], args['experiment_name']), mode='rb')
   cost_grids = np.load(file='./benchmark/{}/{}-matrix.npy'.format(args['experiment_name'], args['experiment_name']))
+  # cost_grids = np.random.randint(1, 3, (20, 32, 32))
+  # np.save('./benchmark/{}/{}-matrix.npy'.format(args['experiment_name'], args['experiment_name']), cost_grids)
 
   if use_bound == None:
     if args['use_cost_bound'] == 'False':
@@ -68,6 +70,10 @@ def Run(args, index=None, use_bound=None):
       if data[j] == 46 or data[j] == 71: # This represent '.' and 'G'
         grids[i][j] = 0
 
+  # for i in range(32):
+  #   print(grids[i])
+  # exit()
+
   sx = np.array(sx_list)  # start x = column in grid image
   sy = np.array(sy_list)  # start y = rows in grid image, the kth component corresponds to the kth robot.
   gx = np.array(gx_list)  # goal x
@@ -83,7 +89,7 @@ def Run(args, index=None, use_bound=None):
 
   print(success)
   print("Paretal Optimal Paths Number:", len(res_cost))
-  # print(res_cost)
+  print(res_cost)
   # print(open_list_res)
   print("Number of close list:", result_dict['closed_num'])
   print("Number of low level calls:", result_dict['low_level_calls'])

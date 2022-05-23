@@ -21,7 +21,7 @@ class MocbsConstraint:
     """
     create a constraint, if a single point, then va=vb
     """
-    self.i = i # i<0, iff not valid
+    self.i = i # i<0, iff not valid.
     self.va = va
     self.vb = vb
     self.ta = ta
