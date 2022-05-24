@@ -6,12 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import mocbs
-import mocbs_new
-import arguments
-from utils import Map
-import moastar # NAMOA*
-import momstar
+from momapf import mocbs_new, arguments
+from momapf.utils import Map
 
 
 def Run(args, index=None, use_bound=None):

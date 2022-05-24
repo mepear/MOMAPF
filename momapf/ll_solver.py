@@ -1,5 +1,5 @@
 from heapq import heappush, heappop
-from utils import DomChecker, tr, is_weakly_dominated
+from .utils import DomChecker, tr, is_weakly_dominated
 from copy import deepcopy
 import numpy as np
 import time

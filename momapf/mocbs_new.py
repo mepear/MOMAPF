@@ -2,11 +2,11 @@ import numpy as np
 import copy
 import time
 
-import common as cm
+import momapf.common as cm
 import itertools as itt
 from copy import deepcopy
-from ll_solver import LLSolver
-from utils import CostBound, gen_splitting
+from .ll_solver import LLSolver
+from .utils import CostBound, gen_splitting
 
 ######
 MOCBS_INIT_SIZE_LIMIT = 800*1000
