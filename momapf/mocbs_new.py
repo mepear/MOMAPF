@@ -27,7 +27,12 @@ class MocbsConstraint:
     self.ta = ta
     self.tb = tb
     self.j = j # undefined by default, this is used for MA-CBS
-    self.flag = flag # flag = 1, vertex conflict, flag = 2 swap conflict
+
+    # flag = 1, negative vertex conflict
+    # flag = 2, negative swap conflict
+    # flag = 3, positive vertex conflict
+    # flag = 4, positive swap conflict
+    self.flag = flag
 
   def __str__(self):
     return "{i:"+str(self.i)+",va:"+str(self.va)+",vb:"+str(self.vb)+\
@@ -44,11 +49,6 @@ class MocbsSol:
   def __str__(self):
     return str(self.paths)
 
-  def AddPath(self, i, path):
-    # add a final infinity interval
-    self.paths[i] = path
-    return 
-
   def DelPath(self, i):
     self.paths.pop(i)
     return
@@ -56,8 +56,9 @@ class MocbsSol:
   def GetPath(self, i):
     return self.paths[i]
 
-  def CheckConflict(self, i,j):
+  def CheckConflict(self, i, j, use_joint_splitting):
     ix = 0
+    choice = np.random.randint(0, 2)
     while ix < len(self.paths[i][1])-1:
       for jx in range(len(self.paths[j][1])-1):
         jtb = self.paths[j][1][jx+1]
@@ -71,11 +72,26 @@ class MocbsSol:
         overlaps, t_lb, t_ub = cm.ItvOverlap(ita,itb,jta,jtb)
         if not overlaps:
           continue
-        if ivb == jvb: # vertex conflict at ivb (=jvb)
-          return [MocbsConstraint(i, ivb, ivb, t_lb+1, t_lb+1, j, 1), MocbsConstraint(j, jvb, jvb, t_lb+1, t_lb+1, i, 1)] # t_ub might be inf?
-          # use min(itb,jtb) to avoid infinity
+        if ivb == jvb: # vertex conflict at ivb
+          if not use_joint_splitting:
+            return [MocbsConstraint(i, ivb, ivb, t_lb+1, t_lb+1, j, 1),
+                    MocbsConstraint(j, jvb, jvb, t_lb+1, t_lb+1, i, 1)]
+          if choice == 0:
+            return [MocbsConstraint(i, ivb, ivb, t_lb+1, t_lb+1, j, 1),
+                    MocbsConstraint(i, ivb, ivb, t_lb+1, t_lb+1, j, 3)]
+          if choice == 1:
+            return [MocbsConstraint(j, jvb, jvb, t_lb + 1, t_lb + 1, i, 1),
+                    MocbsConstraint(j, jvb, jvb, t_lb + 1, t_lb + 1, i, 3)]
         if (ivb == jva) and (iva == jvb): # swap location
-          return [MocbsConstraint(i, iva, ivb, t_lb, t_lb+1, j, 2), MocbsConstraint(j, jva, jvb, t_lb, t_lb+1, i, 2)]
+          if not use_joint_splitting:
+            return [MocbsConstraint(i, iva, ivb, t_lb, t_lb+1, j, 2),
+                    MocbsConstraint(j, jva, jvb, t_lb, t_lb+1, i, 2)]
+          if choice == 0:
+            return [MocbsConstraint(i, iva, ivb, t_lb, t_lb+1, j, 2),
+                    MocbsConstraint(i, iva, ivb, t_lb, t_lb+1, j, 4)]
+          if choice == 1:
+            return [MocbsConstraint(j, jva, jvb, t_lb, t_lb+1, i, 2),
+                    MocbsConstraint(j, jva, jvb, t_lb, t_lb+1, i, 4)]
       ix = ix + 1
     return []
 
@@ -96,17 +112,18 @@ class MocbsNode:
     self.sol = sol
     self.cstr = cstr
     self.cvec = cvec
-    self.cost_bound_list = [CostBound(tuple(0 for _ in range(len(cvec))), [tuple(np.inf for _ in range(len(cvec)))]) for _ in range(num_robots)]
-    self.parent = -1
+    self.cost_bound_list = [CostBound(tuple(0 for _ in range(len(cvec))),
+                                      [tuple(np.inf for _ in range(len(cvec)))]) for _ in range(num_robots)]
+    self.parent = parent
     self.root = -1 # to which tree it belongs
 
     return
 
   def __str__(self):
     str1 = "{id:"+str(self.id)+",cvec:"+str(self.cvec)+",par:"+str(self.parent)
-    return str1+",cstr:"+str(self.cstr)+",sol:"+str(self.sol)+",true_lower_bound:"+str(self.true_lower_bound)+",upper_bound:"+str(self.upper_bound)+"}"
+    return str1+",cstr:"+str(self.cstr)+",sol:"+str(self.sol)+"}"
 
-  def CheckConflict(self):
+  def CheckConflict(self, use_joint_splitting):
     """
     check for conflicts along paths of all pairs of robots.
     record the first one conflict.
@@ -118,7 +135,7 @@ class MocbsNode:
         if k2 in done_set or k2 == k1:
           continue
         # check for collision
-        res = self.sol.CheckConflict(k1,k2)
+        res = self.sol.CheckConflict(k1,k2,use_joint_splitting)
         if len(res) > 0:
           return res
       # end for k2
@@ -128,7 +145,7 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False):
+  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False, use_joint_splitting=False):
     """
     G contains all information about the raw graph.
     """
@@ -162,6 +179,7 @@ class MocbsSearch:
 
     # Cost Bound Related
     self.use_cost_bound = use_cost_bound
+    self.use_joint_splitting = use_joint_splitting
     return
 
   def Search(self, search_limit):
@@ -227,7 +245,10 @@ class MocbsSearch:
         self.nodes[new_id].id = new_id
         self.nodes[new_id].parent = curr_node.id
         self.nodes[new_id].cstr = cstr
-        sstats = self.Lsearch(new_id)  # this can generate multiple nodes
+        if cstr.flag in [1, 2]:
+          sstats = self.Lsearch(new_id)  # this can generate multiple nodes
+        elif cstr.flag in [3, 4]:
+          sstats = self.new_Lsearch(new_id)
         self.UpdateStats(sstats)
         if sstats[2] == 0:
           # this branch fails, robot ri cannot find a consistent path.
@@ -251,7 +272,10 @@ class MocbsSearch:
     close_list_res = len(self.closed_set)
     low_level_time = round(self.total_low_level_time)
     low_level_calls = self.num_low_level_calls
-    branch_factor = float(self.generated_node) / float(self.num_low_level_calls)
+    if self.num_low_level_calls != 0:
+      branch_factor = float(self.generated_node) / float(self.num_low_level_calls)
+    else:
+      branch_factor = None
 
     result_dict = {'time': time_res, 'closed_num': close_list_res, 'low_level_time': low_level_time,
                    'low_level_calls': low_level_calls, 'branch_factor': branch_factor}
@@ -324,26 +348,40 @@ class MocbsSearch:
     nd.cvec = out_cost # update cost in that node
     return out_cost
 
-  def BacktrackCstrs(self, nid):
+  def BacktrackCstrs(self, nid, ri):
     """
     given a node, trace back to the root, find all constraints relavant.
     """
     node_cs = list()
     swap_cs = list()
+    positive_cs = list()
     cid = nid
-    ri = self.nodes[nid].cstr.i
     while cid != -1:
-      if self.nodes[cid].cstr.i == ri: # not a valid constraint
-        # init call of mocbs will not enter this.
+      if self.nodes[cid].cstr.flag in [1, 2]: # not a valid constraint
+        if self.nodes[cid].cstr.i == ri:
+          cstr = self.nodes[cid].cstr
+          if self.nodes[cid].cstr.flag == 1: # negative vertex constraint
+            node_cs.append((cstr.vb, cstr.tb))
+          elif self.nodes[cid].cstr.flag == 2: # negative edge constraint
+            swap_cs.append((cstr.va, cstr.vb, cstr.ta))
+      elif self.nodes[cid].cstr.flag in [3, 4]:
         cstr = self.nodes[cid].cstr
-        if self.nodes[cid].cstr.flag == 1: # vertex constraint
-          node_cs.append( (cstr.vb, cstr.tb) )
-        elif self.nodes[cid].cstr.flag == 2: # edge constraint
-          swap_cs.append( (cstr.va, cstr.vb, cstr.ta) )
+        if self.nodes[cid].cstr.flag == 3:
+          if self.nodes[cid].cstr.i == ri:
+            positive_cs.append((cstr.vb, cstr.tb))
+          else:
+            node_cs.append((cstr.vb, cstr.tb))
+        elif self.nodes[cid].cstr.flag == 4:
+          if self.nodes[cid].cstr.i == ri:
+            positive_cs.append((cstr.va, cstr.ta))
+            positive_cs.append((cstr.vb, cstr.tb))
+          else:
+            node_cs.append((cstr.va, cstr.ta))
+            node_cs.append((cstr.vb, cstr.tb))
       cid = self.nodes[cid].parent
-    return node_cs, swap_cs
+    return node_cs, swap_cs, positive_cs
 
-  def PreProcess(self, node_cs, swap_cs):
+  def PreProcess(self, node_cs, swap_cs, positive_cs):
     swap_dict = dict()
     max_timestep = -1
     for constraint in swap_cs:
@@ -360,21 +398,35 @@ class MocbsSearch:
         node_dict[constraint[0]] = set()
       node_dict[constraint[0]].add(constraint[1])
       max_timestep = max(constraint[1], max_timestep)
-    return node_dict, swap_dict, max_timestep
+
+    positive_dict = dict()
+    for constraint in positive_cs:
+      if constraint[1] not in positive_dict:
+        positive_dict[constraint[1]] = constraint[0]
+      elif positive_dict[constraint[1]] != constraint[0]:
+        positive_dict = None
+      max_timestep = max(constraint[1], max_timestep)
+
+    return node_dict, swap_dict, positive_dict, max_timestep
 
   def Lsearch(self, nid):
     """
-    low level search
+    low level search for one robot
     """
     nd = self.nodes[nid]
     ri = nd.cstr.i
-    node_cs, swap_cs = self.BacktrackCstrs(nid)
+    node_cs, swap_cs, positive_cs = self.BacktrackCstrs(nid, ri)
     lower_bound = nd.cost_bound_list[ri].lb
     upper_bound = nd.cost_bound_list[ri].ub
 
-    # call MOA* and use upper bound to do pruning
-    node_dict, swap_dict, max_timestep = self.PreProcess(node_cs, swap_cs)
-    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict, swap_dict, max_timestep)
+    node_dict, swap_dict, positive_dict, max_timestep = self.PreProcess(node_cs, swap_cs, positive_cs)
+
+    if positive_dict == None:
+      print("Conflict positive constraints!!!")
+      return [0, [], True, time.perf_counter() - self.tstart, 0]
+
+    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict,
+                                                                  swap_dict, positive_dict, max_timestep)
     ct = 0 # count of node generated
 
     if self.use_cost_bound:
@@ -414,7 +466,114 @@ class MocbsSearch:
       ct = ct + 1 # count increase
 
     lsearch_stats.append(ct)
+    lsearch_stats.append(1)
+
     return lsearch_stats
+
+  def FindReplan(self, node):
+
+    constraint_list = list()
+    constraint = node.cstr
+    robot_idx = node.cstr.i
+    replan_list = list()
+    if node.cstr.flag == 3:
+      constraint_list.append((constraint.vb, constraint.tb))
+    elif node.cstr.flag == 4:
+      constraint_list.append((constraint.va, constraint.ta))
+      constraint_list.append((constraint.vb, constraint.tb))
+    for i in range(self.num_robots):
+      if i == robot_idx:
+        replan_list.append(i)
+      else:
+        path = [node.sol.paths[i][0], node.sol.paths[i][1]]
+        if self.is_conflict(path, constraint_list):
+          replan_list.append(i)
+
+    return replan_list
+
+  def is_conflict(self, path, constraint_list):
+
+    flag = False
+    for position, time in constraint_list:
+      if time >= len(path[1]) and path[0][-1] == position:
+        flag = True
+      if time < len(path[1]) and path[0][time] == position:
+        flag = True
+
+    return flag
+
+  def new_Lsearch(self, nid):
+    """
+    low level search with several robot re-planing
+    """
+    path_dict = dict()
+    nd = self.nodes[nid]
+    replan_list = self.FindReplan(nd)
+    print("Replan List", replan_list)
+
+    total_lsearch_stats = [0, None, True, 0, 0, 0]
+
+    for ri in replan_list:
+
+      node_cs, swap_cs, positive_cs = self.BacktrackCstrs(nid, ri)
+      lower_bound = nd.cost_bound_list[ri].lb
+      upper_bound = nd.cost_bound_list[ri].ub
+
+      node_dict, swap_dict, positive_dict, max_timestep = self.PreProcess(node_cs, swap_cs, positive_cs)
+
+      if positive_dict == None:
+        print("Conflict positive constraints!!!")
+        return [0, [], True, time.perf_counter() - self.tstart, 0]
+
+      path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound,
+                                                                    node_dict, swap_dict, positive_dict, max_timestep)
+      if self.use_cost_bound:
+        path_list = gen_splitting(lower_bound, upper_bound, path_list)
+
+      cost_list = []
+      for i in path_list:
+        cost_list.append(i[0])
+      print(cost_list, lower_bound, upper_bound)
+
+      path_dict[ri] = path_list
+
+      total_lsearch_stats[0] += lsearch_stats[0]
+      total_lsearch_stats[3] += lsearch_stats[3]
+
+    total_lsearch_stats[5] = len(replan_list)
+
+    all_combi = list(itt.product(*(path_dict[ri] for ri in replan_list)))
+
+    for path_item in all_combi:
+      new_nd = copy.deepcopy(self.nodes[nid])
+      for i in range(len(replan_list)):
+        new_nd.sol.DelPath(replan_list[i])
+        new_nd.sol.paths[replan_list[i]] = [path_item[i][1][0], path_item[i][1][1], path_item[i][0]]
+        if self.use_cost_bound:
+          new_nd.cost_bound_list[replan_list[i]] = CostBound(path_item[i][2], path_item[i][3])
+      new_nd.cvec = self.ComputeNodeCostObject(new_nd)
+
+      if self.GoalFilterNodeObject(new_nd):
+        continue # skip this dominated node
+
+      # a non-dom node, add to OPEN
+      new_id = new_nd.id # the first node, self.nodes[nid] is ok
+      if total_lsearch_stats[4] > 0: # generate a new node, assign a new id
+        new_id = self.node_id_gen
+        self.node_id_gen = self.node_id_gen + 1
+        new_nd.id = new_id
+      self.nodes[new_id] = new_nd # add to self.nodes
+
+      ### ADD OPEN BEGIN
+      if OPEN_ADD_MODE == 1:
+        self.open_list.add(np.sum(new_nd.cvec), new_nd.id) # add to OPEN
+      elif OPEN_ADD_MODE == 2:
+        self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
+      ### ADD OPEN END
+
+      total_lsearch_stats[4] = total_lsearch_stats[4] + 1
+
+    return total_lsearch_stats
 
   def GoalFilterNode(self,nid):
     """
@@ -448,12 +607,12 @@ class MocbsSearch:
   def UpdateStats(self, stats):
     self.num_closed_low_level_states = self.num_closed_low_level_states + stats[0]
     self.total_low_level_time = self.total_low_level_time + stats[3]
-    self.num_low_level_calls = self.num_low_level_calls + 1
+    self.num_low_level_calls = self.num_low_level_calls + stats[5]
     self.generated_node = self.generated_node + stats[4]
     return
 
   def FirstConflict(self, nd):
-    return nd.CheckConflict()
+    return nd.CheckConflict(self.use_joint_splitting)
 
   def SelectNode(self):
     """
@@ -468,8 +627,10 @@ class MocbsSearch:
     print(popped)
     return True, popped
 
-def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit, use_cost_bound=False):
+def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit,
+                 use_cost_bound=False, use_joint_splitting=False):
 
-  mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit, use_cost_bound=use_cost_bound)
+  mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit,
+                      use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting)
 
   return mocbs.Search(search_limit)

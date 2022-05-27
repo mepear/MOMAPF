@@ -1,6 +1,5 @@
 from heapq import heappush, heappop
 from .utils import DomChecker, tr, is_weakly_dominated
-from copy import deepcopy
 import numpy as np
 import time
 
@@ -27,7 +26,7 @@ class LLNode:
     def __lt__(self, other):
         return self.f_val < other.f_val
 
-def is_constrained(node_constraints, swap_constraints, ll_node, parent_node):
+def is_constrained(node_constraints, swap_constraints, positive_constraints, ll_node, parent_node):
     loc = parent_node.loc
     timestep = parent_node.timestep
     new_loc = ll_node.loc
@@ -37,6 +36,8 @@ def is_constrained(node_constraints, swap_constraints, ll_node, parent_node):
     if new_loc in node_constraints:
         if new_timestep in node_constraints[new_loc]:
             return True
+    if (new_timestep in positive_constraints) and (positive_constraints[new_timestep] != new_loc):
+        return True
     return False
 
 class LLSolver:
@@ -132,7 +133,7 @@ class LLSolver:
 
         return tuple_list, cost_vec_list
 
-    def find_path(self, upper_bound, node_constraints=[], swap_constraints=[], max_timestep=-1):
+    def find_path(self, upper_bound, node_constraints={}, swap_constraints={}, positive_constraints={}, max_timestep=-1):
 
         start_time = time.perf_counter()
 
@@ -165,7 +166,7 @@ class LLSolver:
             num_expand += 1
             children = self.get_children(curr, upper_bound, max_timestep)
             for ch in children:
-                if is_constrained(node_constraints, swap_constraints, ch, ch.parent):
+                if is_constrained(node_constraints, swap_constraints, positive_constraints, ch, ch.parent):
                     continue
                 if sol_dom_checker.is_dominated(tr(ch.f_val)):
                     continue

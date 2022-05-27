@@ -9,6 +9,9 @@ def get_args(args):
         "--use-cost-bound", default='False', type=str, help="whether use cost bound or not"
     )
     parser.add_argument(
+        "--use-joint-splitting", default='False', type=str, help="whether use joint splitting or not"
+    )
+    parser.add_argument(
         "--index", default="0",  type=str, help="index for choosing start and goal locations"
     )
     parser.add_argument(
