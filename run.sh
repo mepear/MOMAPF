@@ -1,5 +1,4 @@
 python run_example.py \
---experiment-name=empty-16-16 \
---robot-num=12 \
---use-cost-bound True\
+--experiment-name=room-32-32-4 \
+--robot-num=8 \
 --cost-name random random

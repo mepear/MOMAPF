@@ -58,7 +58,7 @@ class MocbsSol:
 
   def CheckConflict(self, i, j, use_joint_splitting):
     ix = 0
-    choice = np.random.randint(0, 2)
+    choice = 0 # np.random.randint(0, 2)
     while ix < len(self.paths[i][1])-1:
       for jx in range(len(self.paths[j][1])-1):
         jtb = self.paths[j][1][jx+1]
@@ -378,6 +378,7 @@ class MocbsSearch:
           else:
             node_cs.append((cstr.va, cstr.ta))
             node_cs.append((cstr.vb, cstr.tb))
+            swap_cs.append((cstr.vb, cstr.va, cstr.ta))
       cid = self.nodes[cid].parent
     return node_cs, swap_cs, positive_cs
 
@@ -482,9 +483,7 @@ class MocbsSearch:
       constraint_list.append((constraint.va, constraint.ta))
       constraint_list.append((constraint.vb, constraint.tb))
     for i in range(self.num_robots):
-      if i == robot_idx:
-        replan_list.append(i)
-      else:
+      if i != robot_idx:
         path = [node.sol.paths[i][0], node.sol.paths[i][1]]
         if self.is_conflict(path, constraint_list):
           replan_list.append(i)
@@ -499,6 +498,11 @@ class MocbsSearch:
         flag = True
       if time < len(path[1]) and path[0][time] == position:
         flag = True
+    if len(constraint_list) == 2:
+      if constraint_list[0][1] <= len(path[1]) - 3:
+        if path[0][constraint_list[0][1]] == constraint_list[1][0] \
+                and path[0][constraint_list[1][1]] == constraint_list[0][0]:
+         flag = True
 
     return flag
 

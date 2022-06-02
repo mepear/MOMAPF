@@ -326,7 +326,6 @@ def ndcomax_path(v1, V2):
     tr_vecs = []
 
     for new_vec in sorted((comax(v1, v2), v2, path) for (v2, path) in V2):
-        # new_vec = vec_max(v1, v2)
         if is_weakly_dominated_it(tr(new_vec[0]), tr_vecs):
             continue
         res.append(new_vec)

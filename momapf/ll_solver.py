@@ -178,4 +178,8 @@ class LLSolver:
 
         ll_info = [num_expand, cost_vec_list, True, time.perf_counter() - start_time]
 
+        # print("Cost vector list", cost_vec_list)
+        print("Searching number:", num_expand)
+        print("Time searching", time.perf_counter() - start_time)
+
         return tuple_list, ll_info

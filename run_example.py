@@ -97,13 +97,13 @@ def Run(args, index=None, use_bound=None, use_joint=None):
   print("Branching Factors: ", result_dict['branch_factor'])
   # print(res_path)
 
-  # df = pd.DataFrame({'success': [], "res_num": [], "time": [], "branch_factor": []})
-  # df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound)), index=False, sep=',')
+  # df = pd.DataFrame({'success': [], "res_num": [], "time": [], "low_level_calls": [], "branch_factor": []})
+  # df.to_csv("./benchmark/{}-result/plot_{}_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound), int(use_joint_splitting)), index=False, sep=',')
   #
-  # data = [success, len(res_cost), result_dict['time'], result_dict['branch_factor']]
-  # df = pd.read_csv('./benchmark/{}-result/plot_{}_{}.csv'.format(args['experiment_name'], index, int(use_cost_bound)))
+  # data = [success, len(res_cost), result_dict['time'], result_dict['low_level_calls'], result_dict['branch_factor']]
+  # df = pd.read_csv('./benchmark/{}-result/plot_{}_{}_{}.csv'.format(args['experiment_name'], index, int(use_cost_bound), int(use_joint_splitting)))
   # df.loc[1] = data
-  # df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound)), index=False, sep=',')
+  # df.to_csv("./benchmark/{}-result/plot_{}_{}_{}.csv".format(args['experiment_name'], index, int(use_cost_bound), int(use_joint_splitting)), index=False, sep=',')
   return
 
 
@@ -117,8 +117,10 @@ if __name__ == '__main__':
   print("begin of main")
   # pool = Pool(processes=15)
   # for i in range(1, 26):
-  #   pool.apply_async(main, (args, i, True, ))
-  #   pool.apply_async(main, (args, i, False, ))
+  #   pool.apply_async(main, (args, i, True, True))
+  #   pool.apply_async(main, (args, i, False, True))
+  #   pool.apply_async(main, (args, i, True, False))
+  #   pool.apply_async(main, (args, i, False, False))
   # pool.close()
   # pool.join()
   main(args)
