@@ -557,6 +557,7 @@ class MocbsSearch:
           new_nd.cost_bound_list[replan_list[i]] = CostBound(path_item[i][2], path_item[i][3])
       new_nd.cvec = self.ComputeNodeCostObject(new_nd)
 
+      total_lsearch_stats[4] = total_lsearch_stats[4] + 1
       if self.GoalFilterNodeObject(new_nd):
         continue # skip this dominated node
 
@@ -575,7 +576,6 @@ class MocbsSearch:
         self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
       ### ADD OPEN END
 
-      total_lsearch_stats[4] = total_lsearch_stats[4] + 1
 
     return total_lsearch_stats
 
