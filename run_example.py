@@ -38,6 +38,12 @@ def Run(args, index=None, use_bound=None, use_joint=None):
   else:
     use_joint_splitting = use_joint
 
+
+  if args['draw_graph'] == 'False':
+    draw_graph = False
+  else:
+    draw_graph = True
+
   agent_num = args['robot_num']
   _ = f1.readline()
   _ = f2.readline()
@@ -84,7 +90,8 @@ def Run(args, index=None, use_bound=None, use_joint=None):
   G = Map(grids, cgrids, clist)
 
   ### Invoke MO-CBS planner ###
-  success, res_path, res_cost, result_dict = mocbs_new.RunMocbsMAPF(G, sx, sy, gx, gy, np.inf, 1500, use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting)
+  success, res_path, res_cost, result_dict = mocbs_new.RunMocbsMAPF(G, sx, sy, gx, gy, np.inf,
+                                      1500, use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting, draw_graph=draw_graph)
 
   print(success)
   print("Paretal Optimal Paths Number:", len(res_cost))

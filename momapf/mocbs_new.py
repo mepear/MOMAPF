@@ -8,6 +8,8 @@ from copy import deepcopy
 from .ll_solver import LLSolver
 from .utils import CostBound, gen_splitting
 
+from graphviz import Digraph
+
 ######
 MOCBS_INIT_SIZE_LIMIT = 800*1000
 OPEN_ADD_MODE = 2
@@ -145,7 +147,7 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False, use_joint_splitting=False):
+  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False, use_joint_splitting=False, draw_graph=False):
     """
     G contains all information about the raw graph.
     """
@@ -180,12 +182,23 @@ class MocbsSearch:
     # Cost Bound Related
     self.use_cost_bound = use_cost_bound
     self.use_joint_splitting = use_joint_splitting
+
+    # Graph Related parameter
+    self.draw_graph = draw_graph
+    self.graph = Digraph(format='png')
+    self.graph.node_attr["fixedsize"] = "true"
+    self.graph.node_attr["width"] = "2"
+    self.graph.graph_attr["dpi"] = '1000'
+    self.init_list = []
     return
 
   def Search(self, search_limit):
     """
     high level search
     """
+    if self.draw_graph:
+      self.graph.node('Init')
+
     ########################################################
     #### init search ####
     ########################################################
@@ -276,6 +289,9 @@ class MocbsSearch:
       branch_factor = float(self.generated_node) / float(self.num_low_level_calls)
     else:
       branch_factor = None
+
+    if self.draw_graph:
+      self.graph.render("Tree")
 
     result_dict = {'time': time_res, 'closed_num': close_list_res, 'low_level_time': low_level_time,
                    'low_level_calls': low_level_calls, 'branch_factor': branch_factor}
@@ -416,6 +432,9 @@ class MocbsSearch:
     """
     nd = self.nodes[nid]
     ri = nd.cstr.i
+
+    total_lsearch_stats = [0, None, True, 0, 0, 1]
+
     node_cs, swap_cs, positive_cs = self.BacktrackCstrs(nid, ri)
     lower_bound = nd.cost_bound_list[ri].lb
     upper_bound = nd.cost_bound_list[ri].ub
@@ -428,6 +447,10 @@ class MocbsSearch:
 
     path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict,
                                                                   swap_dict, positive_dict, max_timestep)
+
+    total_lsearch_stats[0] = lsearch_stats[0]
+    total_lsearch_stats[3] = lsearch_stats[3]
+
     ct = 0 # count of node generated
 
     if self.use_cost_bound:
@@ -445,6 +468,8 @@ class MocbsSearch:
       new_nd.cvec = self.ComputeNodeCostObject(new_nd)
       if self.use_cost_bound:
         new_nd.cost_bound_list[ri] = CostBound(path_item[2], path_item[3])
+
+      total_lsearch_stats[4] += 1
 
       if self.GoalFilterNodeObject(new_nd):
         continue # skip this dominated node
@@ -464,12 +489,31 @@ class MocbsSearch:
         self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
       ### ADD OPEN END
 
-      ct = ct + 1 # count increase
+      if self.draw_graph:
+        constraint = new_nd.cstr
+        parent_id = self.nodes[new_nd.parent].id
+        label = ""
+        if constraint.flag == 1:
+          label += "Vertice "
+        if constraint.flag == 2:
+          label += "Edge "
+        label += "Agent:{}\n Vertice:{}, Timestep:{}\n".format(constraint.i, constraint.va, constraint.ta)
+        label += "Cost:"
+        label += str(new_nd.sol.paths[ri][2])
+        label += " Time:{}".format(int(lsearch_stats[3]))
 
-    lsearch_stats.append(ct)
-    lsearch_stats.append(1)
+        if parent_id <= self.num_roots:
+          self.graph.node("Node_{}".format(parent_id))
+          if parent_id not in self.init_list:
+            self.init_list.append(parent_id)
+            self.graph.edge("Init", "Node_{}".format(parent_id))
 
-    return lsearch_stats
+        self.graph.node("Node_{}".format(self.node_id_gen - 1), label=label)
+        self.graph.edge("Node_{}".format(parent_id), "Node_{}".format(self.node_id_gen - 1))
+
+      ct = ct + 1  # count increase
+
+    return total_lsearch_stats
 
   def FindReplan(self, node):
 
@@ -632,9 +676,9 @@ class MocbsSearch:
     return True, popped
 
 def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit,
-                 use_cost_bound=False, use_joint_splitting=False):
+                 use_cost_bound=False, use_joint_splitting=False, draw_graph=False):
 
   mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit,
-                      use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting)
+                      use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting, draw_graph=draw_graph)
 
   return mocbs.Search(search_limit)

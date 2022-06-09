@@ -23,6 +23,9 @@ def get_args(args):
     parser.add_argument(
         "--cost-name", type=str, nargs='+', help="cost name list"
     )
+    parser.add_argument(
+        "--draw-graph", default='False', type=str, help="whether draw graph"
+    )
     args = parser.parse_args(args) if args is not None else parser.parse_args()
 
     return args
