@@ -12,10 +12,13 @@ def get_args(args):
         "--use-joint-splitting", default='False', type=str, help="whether use joint splitting or not"
     )
     parser.add_argument(
+        "--use-caching", default='False', type=str, help="whether use caching or not"
+    )
+    parser.add_argument(
         "--index", default="0",  type=str, help="index for choosing start and goal locations"
     )
     parser.add_argument(
-        "--heuristic-name", default=False, help="heuristic name for experiment"
+        "--heuristic-name", type=str, default='perfect', help="heuristic name for experiment"
     )
     parser.add_argument(
         "--robot-num", default=0, type=int, help="number of moveable robots"

@@ -115,7 +115,7 @@ class MocbsNode:
     self.cstr = cstr
     self.cvec = cvec
     self.cost_bound_list = [CostBound(tuple(0 for _ in range(len(cvec))),
-                                      [tuple(np.inf for _ in range(len(cvec)))]) for _ in range(num_robots)]
+                                    []) for _ in range(num_robots)]
     self.parent = parent
     self.root = -1 # to which tree it belongs
 
@@ -147,7 +147,8 @@ class MocbsNode:
 class MocbsSearch:
   """
   """
-  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_cost_bound=False, use_joint_splitting=False, draw_graph=False):
+  def __init__(self, G, sx_list, sy_list, gx_list, gy_list, time_limit, use_disjoint_bound=False, use_cost_bound=False,
+               use_joint_splitting=False, draw_graph=False, use_caching=False):
     """
     G contains all information about the raw graph.
     """
@@ -160,10 +161,9 @@ class MocbsSearch:
     self.gy_list = deepcopy(gy_list)
     self.num_robots = len(sx_list)
     self.cdim = G.num_objective
-    self.cgrids = G.cost_grids # for multi-dimensional cost.
     self.time_limit = time_limit
-    self.clist = G.cost_list
-    self.ll_starter_list = [LLSolver(G, sy_list[i] * self.xd + sx_list[i], gy_list[i] * self.xd + self.gx_list[i]) for i in range(self.num_robots)]
+    self.ll_starter_list = [LLSolver(G, sy_list[i] * self.xd + sx_list[i], gy_list[i] * self.xd + self.gx_list[i])
+                            for i in range(self.num_robots)]
 
     # Search Related args
     self.nodes = dict() # high level nodes
@@ -181,15 +181,25 @@ class MocbsSearch:
 
     # Cost Bound Related
     self.use_cost_bound = use_cost_bound
+    self.use_disjoint_bound = use_disjoint_bound
     self.use_joint_splitting = use_joint_splitting
 
     # Graph Related parameter
     self.draw_graph = draw_graph
-    self.graph = Digraph(format='png')
+    self.graph = Digraph(format='pdf')
     self.graph.node_attr["fixedsize"] = "true"
     self.graph.node_attr["width"] = "2"
+    self.graph.node_attr["height"] = "1"
     self.graph.graph_attr["dpi"] = '1000'
     self.init_list = []
+    self.graph_node_number = 0
+
+    # Caching Related parameter
+    self.use_caching = use_caching
+    if use_caching:
+      self.caching_dict = [dict() for _ in range(self.num_robots)]
+      self.caching_list = [list() for _ in range(self.num_robots)]
+      self.max_caching = 10
     return
 
   def Search(self, search_limit):
@@ -231,6 +241,8 @@ class MocbsSearch:
         break
       if self.GoalFilterNode(popped[1]):
         continue
+      # if self.graph_node_number >= 100:
+      #   break
       ########################################################
       #### pop a non-dominated from OPEN, END ####
       ########################################################
@@ -307,13 +319,13 @@ class MocbsSearch:
     self.pareto_idvl_path_dict = dict()
     for ri in range(self.num_robots):
 
-      single_pareto_path, _ = self.ll_starter_list[ri].find_path([tuple(np.inf for _ in range(self.cdim))])
+      single_pareto_path, _ = self.ll_starter_list[ri].find_path(list())
       self.pareto_idvl_path_dict[ri] = single_pareto_path
 
       if self.use_cost_bound:
         trivial_lb = tuple(0 for _ in range(self.cdim))
-        trivial_ub = [tuple(np.inf for _ in range(self.cdim))]
-        self.pareto_idvl_path_dict[ri] = gen_splitting(trivial_lb, trivial_ub, single_pareto_path)
+        trivial_ub = list()
+        self.pareto_idvl_path_dict[ri] = gen_splitting(trivial_lb, trivial_ub, single_pareto_path, self.use_disjoint_bound)
 
       tnow = time.perf_counter()
       if (tnow - self.tstart > self.time_limit):
@@ -426,6 +438,29 @@ class MocbsSearch:
 
     return node_dict, swap_dict, positive_dict, max_timestep
 
+  def is_cached(self, ri, node_cs, swap_cs, positive_cs):
+    idx = -1
+    for node, swap, positive in self.caching_list[ri]:
+      idx += 1
+      if len(node_cs) != len(node) or len(swap) != len(swap_cs) or len(positive_cs) != len(positive):
+        continue
+      flag = True
+      for i in node_cs:
+        if i not in node:
+          flag = False
+          break
+      for i in swap_cs:
+        if i not in swap:
+          flag = False
+          break
+      for i in positive_cs:
+        if i not in swap:
+          flag = False
+          break
+      if flag == True:
+        return idx
+    return None
+
   def Lsearch(self, nid):
     """
     low level search for one robot
@@ -445,7 +480,19 @@ class MocbsSearch:
       print("Conflict positive constraints!!!")
       return [0, [], True, time.perf_counter() - self.tstart, 0]
 
-    path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict,
+    if self.use_caching and (len(node_cs) + len(swap_cs) + len(positive_cs)) <= self.max_caching:
+      idx = self.is_cached(ri, node_cs, swap_cs, positive_cs)
+      if idx != None:
+        path_list, lsearch_stats = self.caching_dict[ri][idx]
+        print("Cached !!!")
+      else:
+        path_list, lsearch_stats = self.ll_starter_list[ri].find_path([], node_dict, swap_dict,
+                                                                      positive_dict, max_timestep)
+        idx = len(self.caching_list[ri])
+        self.caching_list[ri].append([node_cs, swap_cs, positive_cs])
+        self.caching_dict[ri][idx] = [path_list, lsearch_stats]
+    else:
+      path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict,
                                                                   swap_dict, positive_dict, max_timestep)
 
     total_lsearch_stats[0] = lsearch_stats[0]
@@ -454,7 +501,7 @@ class MocbsSearch:
     ct = 0 # count of node generated
 
     if self.use_cost_bound:
-      path_list = gen_splitting(lower_bound, upper_bound, path_list)
+      path_list = gen_splitting(lower_bound, upper_bound, path_list, self.use_disjoint_bound)
 
     cost_list = []
     for i in path_list:
@@ -489,7 +536,7 @@ class MocbsSearch:
         self.open_list.add(tuple(new_nd.cvec), new_nd.id) # add to OPEN
       ### ADD OPEN END
 
-      if self.draw_graph:
+      if self.draw_graph and self.graph_node_number <= 100:
         constraint = new_nd.cstr
         parent_id = self.nodes[new_nd.parent].id
         label = ""
@@ -502,14 +549,17 @@ class MocbsSearch:
         label += str(new_nd.sol.paths[ri][2])
         label += " Time:{}".format(int(lsearch_stats[3]))
 
-        if parent_id <= self.num_roots:
+        if parent_id <= self.num_roots and self.graph_node_number <= 100:
           self.graph.node("Node_{}".format(parent_id))
           if parent_id not in self.init_list:
             self.init_list.append(parent_id)
             self.graph.edge("Init", "Node_{}".format(parent_id))
+            self.graph_node_number += 1
 
-        self.graph.node("Node_{}".format(self.node_id_gen - 1), label=label)
-        self.graph.edge("Node_{}".format(parent_id), "Node_{}".format(self.node_id_gen - 1))
+        if self.graph_node_number <= 100:
+          self.graph.node("Node_{}".format(self.node_id_gen - 1), label=label)
+          self.graph.edge("Node_{}".format(parent_id), "Node_{}".format(self.node_id_gen - 1))
+          self.graph_node_number += 1
 
       ct = ct + 1  # count increase
 
@@ -573,10 +623,23 @@ class MocbsSearch:
         print("Conflict positive constraints!!!")
         return [0, [], True, time.perf_counter() - self.tstart, 0]
 
-      path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound,
-                                                                    node_dict, swap_dict, positive_dict, max_timestep)
+      if self.use_caching and (len(node_cs) + len(swap_cs) + len(positive_cs)) <= self.max_caching:
+        idx = self.is_cached(ri, node_cs, swap_cs, positive_cs)
+        if idx != None:
+          path_list, lsearch_stats = self.caching_dict[ri][idx]
+          print("Cached !!!")
+        else:
+          path_list, lsearch_stats = self.ll_starter_list[ri].find_path([], node_dict, swap_dict,
+                                                                        positive_dict, max_timestep)
+          idx = len(self.caching_list[ri])
+          self.caching_list[ri].append([node_cs, swap_cs, positive_cs])
+          self.caching_dict[ri][idx] = [path_list, lsearch_stats]
+      else:
+        path_list, lsearch_stats = self.ll_starter_list[ri].find_path(upper_bound, node_dict,
+                                                                      swap_dict, positive_dict, max_timestep)
+
       if self.use_cost_bound:
-        path_list = gen_splitting(lower_bound, upper_bound, path_list)
+        path_list = gen_splitting(lower_bound, upper_bound, path_list, self.use_disjoint_bound)
 
       cost_list = []
       for i in path_list:
@@ -675,10 +738,10 @@ class MocbsSearch:
     print(popped)
     return True, popped
 
-def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit,
-                 use_cost_bound=False, use_joint_splitting=False, draw_graph=False):
+def RunMocbsMAPF(G, sx, sy, gx, gy, search_limit, time_limit, use_disjoint_bound=False,
+                 use_cost_bound=False, use_joint_splitting=False, draw_graph=False, use_caching=False):
 
-  mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit,
-                      use_cost_bound=use_cost_bound, use_joint_splitting=use_joint_splitting, draw_graph=draw_graph)
+  mocbs = MocbsSearch(G, sx, sy, gx, gy, time_limit, use_disjoint_bound=use_disjoint_bound, use_cost_bound=use_cost_bound,
+                      use_joint_splitting=use_joint_splitting, draw_graph=draw_graph, use_caching=use_caching)
 
   return mocbs.Search(search_limit)

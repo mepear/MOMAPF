@@ -130,9 +130,10 @@ class Map:
     """
     Used to save map information and other map related cost information
     """
-    def __init__(self, grid_map, cost_grids, cost_list):
+    def __init__(self, grid_map, cost_grids, hill_grid, cost_list):
         self.map = grid_map
         self.cost_grids = cost_grids
+        self.hill_grid = hill_grid
         (self.y_length, self.x_length) = self.map.shape
         self.cost_list = cost_list
         self.num_objective = len(cost_list)
@@ -198,6 +199,47 @@ class Map:
                             not_found_dict[location_temp] = found_dict[location] + 1
                         else:
                             not_found_dict[location_temp] = min(found_dict[location] + 1,
+                                                                not_found_dict[location_temp])
+                    # End for
+                    if not not_found_dict:
+                        break
+                    location = min(not_found_dict, key=lambda x: not_found_dict[x])
+                    cy = int(np.floor(location / self.x_length))
+                    cx = int(location % self.x_length)
+                    found_dict[location] = not_found_dict[location]
+                    not_found_dict.pop(location)
+                perfect_heuristic[idx] = found_dict
+            elif self.cost_list[idx] == 'hill':
+                found_dict = {goal: 0}
+                not_found_dict = dict()
+                action_x = [1, 0, -1, 0]
+                action_y = [0, 1, 0, -1]
+                location = goal
+                cy = int(np.floor(location / self.x_length))
+                cx = int(location % self.x_length)
+                while True:
+                    for i in range(4):
+                        cy_temp = cy + action_y[i]
+                        cx_temp = cx + action_x[i]
+                        location_temp = cy_temp * self.x_length + cx_temp
+                        if (cx_temp >= self.x_length) or (cx_temp < 0) or (cy_temp >= self.y_length) or (cy_temp < 0):
+                            continue
+                        if self.map[cy_temp, cx_temp] > 0:
+                            continue
+
+                        if self.hill_grid[cy_temp, cx_temp] < self.hill_grid[cy, cx]:
+                            increase = self.hill_grid[cy, cx] - self.hill_grid[cy_temp, cx_temp]
+                        elif self.hill_grid[cy_temp, cx_temp] == self.hill_grid[cy, cx]:
+                            increase = 1
+                        else:
+                            increase = 1
+
+                        if location_temp in found_dict:
+                            continue
+                        elif location_temp not in not_found_dict:
+                            not_found_dict[location_temp] = found_dict[location] + increase
+                        else:
+                            not_found_dict[location_temp] = min(found_dict[location] + increase,
                                                                 not_found_dict[location_temp])
                     # End for
                     if not not_found_dict:
@@ -275,6 +317,20 @@ class Map:
                     out_cost[idx] = out_cost[idx] + 1
             elif self.cost_list[idx] == 'time':
                 out_cost[idx] += 1
+            elif self.cost_list[idx] == 'hill':
+                if new_loc != loc:
+                    new_cy = int(np.floor(new_loc / self.x_length))
+                    new_cx = int(new_loc % self.x_length)
+                    cy = int(np.floor(loc / self.x_length))
+                    cx = int(loc % self.x_length)
+                    if self.hill_grid[new_cy, new_cx] > self.hill_grid[cy, cx]:
+                        out_cost[idx] += (self.hill_grid[new_cy, new_cx] - self.hill_grid[cy, cx])
+                    elif self.hill_grid[new_cy, new_cx] == self.hill_grid[cy, cx]:
+                        out_cost[idx] += 1
+                    else:
+                        out_cost[idx] += 1
+                else:
+                    out_cost[idx] += 1
             elif self.cost_list[idx] == 'distance':
                 if new_loc != loc:
                     out_cost[idx] += 1
@@ -334,17 +390,18 @@ def ndcomax_path(v1, V2):
     return res
 
 
-def gen_splitting(lb, ub, paths):
+def gen_splitting(lb, ub, paths, use_disjoint_bound):
     prev = []
     result = []
 
     for lower_bound, cost, path in ndcomax_path(lb, paths):
         new_lb = lower_bound
         new_ub = []
-        for u in ub:
-            new_ub = update_list_it(new_ub, comax(u, lower_bound))
-        for p in prev:
-            new_ub = update_list_it(new_ub, comax(p, lower_bound))
+        if use_disjoint_bound:
+            for u in ub:
+                new_ub = update_list_it(new_ub, comax(u, lower_bound))
+            for p in prev:
+                new_ub = update_list_it(new_ub, comax(p, lower_bound))
 
         flag = True
         for item in new_ub:
