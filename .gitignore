@@ -133,3 +133,4 @@ dmypy.json
 .pyre/
 *.csv
 *.zip
+data_process.py
