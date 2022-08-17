@@ -19,13 +19,9 @@ Below shows the code structure.
 │
 ├─benchmark
 │  ├─empty-16-16
-│  ├─empty-16-16-result
 │  ├─maze-32-32-2
-│  ├─maze-32-32-2-result
 │  ├─random-32-32-20
-│  ├─random-32-32-20-result
-│  ├─room-32-32-4
-│  └─room-32-32-4-result
+│  └─room-32-32-4
 │
 ├─momapf
 │  │  arguments.py
