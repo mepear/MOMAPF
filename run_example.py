@@ -99,7 +99,7 @@ def Run(args, index=None, agent=None, use_bound=None, use_disjoint_bound=None, u
   gx = np.array(gx_list)  # goal x
   gy = np.array(gy_list)  # goal y
 
-  cgrids = [cost_grids[0], cost_grids[1]]
+  cgrids = [cost_grids[0], cost_grids[1], cost_grids[2]]
   clist = args['cost_name']
 
   G = Map(grids, cgrids, hill_grid, clist)
@@ -120,12 +120,12 @@ def Run(args, index=None, agent=None, use_bound=None, use_disjoint_bound=None, u
   # print(res_path)
 
   df = pd.DataFrame({'success': [], "res_num": [], "time": [], "low_level_calls": [], "branch_factor": []})
-  df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)), index=False, sep=',')
+  df.to_csv("./benchmark/{}-result/plot_{}_{}_{}.csv".format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)), index=False, sep=',')
 
   data = [success, len(res_cost), result_dict['time'], result_dict['low_level_calls'], result_dict['branch_factor']]
-  df = pd.read_csv('./benchmark/{}-result/plot_{}_{}.csv'.format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)))
+  df = pd.read_csv('./benchmark/{}-result/plot_{}_{}_{}.csv'.format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)))
   df.loc[1] = data
-  df.to_csv("./benchmark/{}-result/plot_{}_{}.csv".format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)), index=False, sep=',')
+  df.to_csv("./benchmark/{}-result/plot_{}_{}_{}.csv".format(args['experiment_name'], agent_num, index, int(use_cost_bound) + int(use_joint_splitting) + int(use_disjoint_bound)), index=False, sep=',')
   return
 
 
@@ -137,14 +137,14 @@ def main(args, index=None, agent=None, use_bound=None, use_disjoint_bound=None, 
 if __name__ == '__main__':
   args = vars(arguments.get_args(sys.argv[1:]))
   print("begin of main")
-  pool = Pool(processes=30)
-  for j in range(5, 21):
-    for i in range(1, 26):
-      pool.apply_async(main, (args, i, j, True, True, True, True))
-      pool.apply_async(main, (args, i, j, True, True, False, True))
-      pool.apply_async(main, (args, i, j, True, False, False, True))
-      pool.apply_async(main, (args, i, j, False, False, False, True))
-    pool.close()
-    pool.join()
-  # main(args, use_disjoint_bound=True)
+  # pool = Pool(processes=30)
+  # for j in range(2, 11):
+  #   for i in range(1, 26):
+  #     pool.apply_async(main, (args, i, j, True, True, True, True))
+  #     pool.apply_async(main, (args, i, j, True, True, False, True))
+  #     pool.apply_async(main, (args, i, j, True, False, False, True))
+  #     pool.apply_async(main, (args, i, j, False, False, False, True))
+  # pool.close()
+  # pool.join()
+  main(args, 3, 5, True, True, True, True)
   print("end of main")

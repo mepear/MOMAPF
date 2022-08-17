@@ -1,4 +1,3 @@
 python run_example.py \
---experiment-name=empty-16-16 \
---cost-name random random
-#--robot-num=7
+--experiment-name=room-32-32-4 \
+--cost-name random random random

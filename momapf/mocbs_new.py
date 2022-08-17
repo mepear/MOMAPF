@@ -11,7 +11,7 @@ from .utils import CostBound, gen_splitting
 from graphviz import Digraph
 
 ######
-MOCBS_INIT_SIZE_LIMIT = 800*1000
+MOCBS_INIT_SIZE_LIMIT = 900*1000
 OPEN_ADD_MODE = 2
 ######
 
@@ -292,10 +292,10 @@ class MocbsSearch:
       all_path_set[hnode.id] = hnode.sol.paths
       all_cost_vec[hnode.id] = hnode.cvec
 
-    time_res = round(time.perf_counter() - self.tstart)
+    time_res = round(time.perf_counter() - self.tstart, 5)
     open_list_res = self.open_list.size()
     close_list_res = len(self.closed_set)
-    low_level_time = round(self.total_low_level_time)
+    low_level_time = round(self.total_low_level_time, 5)
     low_level_calls = self.num_low_level_calls
     if self.num_low_level_calls != 0:
       branch_factor = float(self.generated_node) / float(self.num_low_level_calls)
